@@ -464,7 +464,7 @@ while ($true) {
                     
                     $ElapsedSec = [math]::Round($SyncTimer.Elapsed.TotalSeconds, 2)
                     $PayloadSizeKB = [math]::Round($Utf8Bytes.Length / 1KB, 2)
-                    "$(Get-Date) - [Cloud Sync] Attempt $Attempt: Success. Size: $PayloadSizeKB KB | Time: $ElapsedSec s." | Out-File "$WorkDir\SAM_Log.txt" -Append
+                    "$(Get-Date) - [Cloud Sync] Attempt $($Attempt): Success. Size: $PayloadSizeKB KB | Time: $ElapsedSec s." | Out-File "$WorkDir\SAM_Log.txt" -Append
 
                     if ($Response -match "Success" -or $Response -match "Ack") {
                         $CurrentData | ConvertTo-Json -Depth 5 | Out-File $StateFile -Encoding UTF8
