@@ -3,13 +3,16 @@ param(
     [switch]$DeepScan
 )
 
+# --- SECURITY PROTOCOL PATCH ---
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+
 # ==============================================================================
 # SYSTEM NAME : S.A.M. (Smart Agent Management)
-# VERSION     : 2.1.2 (Immortal Loop, Adaptive Jitter & Self-Healing)
+# VERSION     : 2.1.3 (Task Scheduler Driven, Adaptive Jitter)
 # DEVELOPER   : Aphichat IT Support
 # ==============================================================================
 
-$CurrentVersion  = "2.1.2"
+$CurrentVersion  = "2.1.3"
 $SystemName      = "SAM_Agent"
 $AgentVersion    = "v$CurrentVersion"
 $WorkDir         = "C:\IT_Support"
@@ -24,25 +27,36 @@ $AgentUrl    = "https://johnapichat-dotcom.github.io/sam-agent-update/SAM_Update
 $TaskBaseUrl = "https://johnapichat-dotcom.github.io/sam-agent-update/"
 
 # ==========================================
-# FOLDER SELF-DEFENSE & HARDENING
+# 1. FOLDER SELF-DEFENSE & TASK SCHEDULER SETUP
 # ==========================================
-Function Invoke-SAMHardening {
+Function Invoke-SAMSetup {
     try {
         if (-not (Test-Path $WorkDir)) { 
             New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null 
-            # 1. พรางตัว (Stealth)
             $DirInfo = Get-Item $WorkDir
             $DirInfo.Attributes = 'Hidden, System'
-            # 2. ป้องกันการแก้ไข (NTFS Lockdown)
+            
             $Acl = Get-Acl $WorkDir
             $Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("Users", "Write, AppendData, DeleteSubdirectoriesAndFiles, Delete", "ContainerInherit, ObjectInherit", "None", "Deny")
             $Acl.AddAccessRule($Ar)
             Set-Acl -Path $WorkDir -AclObject $Acl
         }
-    } catch { }
+
+        # --- Register Windows Task Scheduler ---
+        $TaskName = "SAM_Agent_DailySync"
+        $TaskExists = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        
+        if (-not $TaskExists) {
+            $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Silent"
+            $Trigger = New-ScheduledTaskTrigger -Daily -At 8:00AM
+            $Settings = New-ScheduledTaskSettingsSet -RunIfNetworkAvailable -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+            Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -User "NT AUTHORITY\SYSTEM" -RunLevel Highest -Force | Out-Null
+            "$(Get-Date) - Task Scheduler Registered Successfully." | Out-File "$WorkDir\SAM_Log.txt" -Append
+        }
+    } catch { "$(Get-Date) - Setup Error: $($_.Exception.Message)" | Out-File "$WorkDir\SAM_Log.txt" -Append }
 }
 
-Invoke-SAMHardening
+Invoke-SAMSetup
 
 # --- Console Window Concealment (Stealth Mode) ---
 if (-not $Silent) {
@@ -64,7 +78,7 @@ if (-not $Silent) {
 }
 
 # ==========================================
-# INITIAL CONFIGURATION INTERFACE (GUI)
+# 2. INITIAL CONFIGURATION INTERFACE (GUI)
 # ==========================================
 $ConfigFile = "$WorkDir\SystemConfig.json"
 
@@ -194,537 +208,512 @@ if (Test-Path $ConfigFile) {
 }
 
 # ==============================================================================
-# THE IMMORTAL LOOP (24/7 Lifecycle)
+# 3. EXECUTION PHASE (One-Shot per Day)
 # ==============================================================================
-while ($true) {
-    
-    $CurrentTime = Get-Date
-    $HasSyncedToday = $false
+$CurrentTime = Get-Date
 
-    # --- Phase 1: Catch-Up & State Awareness ---
-    if (Test-Path $StateFile) {
-        $LastSyncTime = (Get-Item $StateFile).LastWriteTime
-        if ($LastSyncTime.Date -eq $CurrentTime.Date) {
-            $HasSyncedToday = $true
+# --- Catch-Up & State Awareness (Abort if already synced today) ---
+if (Test-Path $StateFile) {
+    $LastSyncTime = (Get-Item $StateFile).LastWriteTime
+    if ($LastSyncTime.Date -eq $CurrentTime.Date) {
+        if ($Silent) { 
+            "$(Get-Date) - Already synced today. Task terminating gracefully." | Out-File "$WorkDir\SAM_Log.txt" -Append
+            exit 
         }
-    }
-
-    if (-not $HasSyncedToday) {
-        
-        # --- Phase 2: Smart Queueing (Adaptive Jitter) ---
-        if ($Silent) {
-            if ($CurrentTime.Hour -ge 8 -and $CurrentTime.Hour -lt 14) {
-                $EndTime = Get-Date -Hour 14 -Minute 0 -Second 0
-                $RemainingSeconds = ($EndTime - $CurrentTime).TotalSeconds
-                $RandomWait = Get-Random -Minimum 10 -Maximum [int]$RemainingSeconds
-                "$(Get-Date) - [Queue] Prime Window (8-14). Delaying $RandomWait seconds." | Out-File "$WorkDir\SAM_Log.txt" -Append
-                Start-Sleep -Seconds $RandomWait
-            }
-            elseif ($CurrentTime.Hour -ge 14) {
-                $RandomWait = Get-Random -Minimum 60 -Maximum 300
-                "$(Get-Date) - [Queue] Latecomer. Quick sync in $RandomWait seconds." | Out-File "$WorkDir\SAM_Log.txt" -Append
-                Start-Sleep -Seconds $RandomWait
-            }
-            else {
-                $RandomWait = Get-Random -Minimum 300 -Maximum 600
-                "$(Get-Date) - [Queue] Early bird. Sync in $RandomWait seconds." | Out-File "$WorkDir\SAM_Log.txt" -Append
-                Start-Sleep -Seconds $RandomWait
-            }
-        }
-
-        # --- Phase 3: Execution & Failover ---
-        
-        # 3.1 NETWORK CONNECTIVITY CHECK
-        $MaxWaitLoops = 24
-        $CurrentLoop = 0
-        $InternetReady = $false
-
-        while ($CurrentLoop -lt $MaxWaitLoops -and -not $InternetReady) {
-            try {
-                $NetCheck = Invoke-WebRequest -Uri "http://www.msftconnecttest.com/connecttest.txt" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
-                if ($NetCheck.Content -match "Microsoft Connect Test") { $InternetReady = $true } else { throw "Captive Portal Detected" }
-            } catch {
-                $CurrentLoop++
-                if (-not $Silent) { Write-Host "[Warning] Network offline. Retrying in 5 minutes... ($CurrentLoop/$MaxWaitLoops)" -ForegroundColor Yellow }
-                Start-Sleep -Seconds 300 
-            }
-        }
-
-        if (-not $InternetReady) { 
-            "$(Get-Date) - [Offline] No network after 2 hours. Hibernating till next cycle." | Out-File "$WorkDir\SAM_Log.txt" -Append
-        } else {
-        
-            # 3.2 AUTOMATED AGENT UPDATE MODULE (OTA)
-            if (-not $env:SAM_JUST_UPDATED) { 
-                Try {
-                    $RawVersion = (Invoke-RestMethod -Uri $VersionUrl -UseBasicParsing -ErrorAction Stop)
-                    $LatestVersion = [regex]::Match($RawVersion, '(\d+\.\d+\.\d+)').Value
-                    if ([version]$LatestVersion -gt [version]$CurrentVersion) {
-                        Invoke-WebRequest -Uri $AgentUrl -OutFile $TempPath -ErrorAction Stop
-                        if ((Get-Item $TempPath).Length -gt 1000) { 
-                            $RunMode = if ($Silent) { "-Silent" } else { "" }
-                            $SwapCmd = "cmd /c timeout /t 2 > nul && del `"$ScriptPath`" && move `"$TempPath`" `"$ScriptPath`" && set SAM_JUST_UPDATED=1 && powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" $RunMode"
-                            Start-Process cmd.exe -ArgumentList "/c $SwapCmd" -WindowStyle Hidden
-                            exit 
-                        }
-                    }
-                } Catch { }
-            }
-
-            # ==========================================
-            # 3.3 REPORT GENERATION & AUTOMATED HOUSEKEEPING
-            # ==========================================
-            $CleanBranchName = $BranchID -replace '[\\/:*?"<>|]', '-'
-            $ReportPrefix = "$($BU)_$($CleanBranchName)_$($env:COMPUTERNAME)"
-            $ReportPath = "$WorkDir\$ReportPrefix`_$(Get-Date -Format 'yyyy-MM-dd').html"
-
-            Get-ChildItem -Path $WorkDir -Filter "$ReportPrefix*.html" | Where-Object { $_.FullName -ne $ReportPath } | Remove-Item -Force -ErrorAction SilentlyContinue
-
-            $CSS = "<style>body{font-family:'Leelawadee UI', Tahoma, sans-serif;margin:20px}table{border-collapse:collapse;width:95%;margin:auto auto 25px;box-shadow:0 2px 3px rgba(0,0,0,.1)}th,td{border:1px solid #ddd;text-align:left;padding:8px}th{background-color:#f2f2f2}tr:nth-child(even){background-color:#f9f9f9}h1,h2,h3{text-align:center;color:#333;}h1{border-bottom:2px solid #eee;padding-bottom:10px}h3{font-size:1.2em; color:#0056b3; text-align:left; margin-left: 2.5%;}</style>"
-            $HTML = "<!DOCTYPE html><html><head><meta charset='UTF-8'>$CSS</head><body><h1>System Audit Report for $env:COMPUTERNAME<br><span style='font-size:0.6em; color:#666;'>(BU: $BU | Branch: $BranchID | Agent: $AgentVersion)</span></h1>"
-
-            # --- System Specifications ---
-            $OS = Get-CimInstance Win32_OperatingSystem
-            $RegOS = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
-            $DisplayVer = if ($RegOS.DisplayVersion) { $RegOS.DisplayVersion } else { $RegOS.ReleaseId }
-            $ExactOSVersion = "Version $DisplayVer (OS Build $($RegOS.CurrentBuild).$($RegOS.UBR))"
-            $CombinedOS = "$($OS.Caption) ($ExactOSVersion)"
-
-            $CompSys = Get-CimInstance Win32_ComputerSystem
-            $BIOS = Get-CimInstance Win32_BIOS
-            $CPU = Get-CimInstance Win32_Processor
-            $RAM_Items = Get-CimInstance Win32_PhysicalMemory
-            $RAM_Total = [math]::Round(($RAM_Items | Measure-Object -Property Capacity -Sum).Sum / 1GB, 2)
-            $RAM_Details = ($RAM_Items | ForEach-Object { "$([math]::Round($_.Capacity/1GB,0)) GB @ $(if ($_.ConfiguredClockSpeed) { $_.ConfiguredClockSpeed } else { $_.Speed }) MHz" }) -join "<br>"
-            $CompDesc = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\lanmanserver\parameters" -Name "srvcomment" -ErrorAction SilentlyContinue).srvcomment
-
-            $TV_Reg = Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\TeamViewer" -ErrorAction SilentlyContinue
-            $TV_ID = if ($TV_Reg.ClientID) { $TV_Reg.ClientID } else { "Not Installed" }
-            $TV_Ver = if ($TV_Reg.Version) { $TV_Reg.Version } else { "" }
-
-            $AD_Conf = "$env:ProgramData\AnyDesk\system.conf"
-            $AD_ID = "Not Installed"
-            if (Test-Path $AD_Conf) { $AD_Line = Get-Content $AD_Conf | Where-Object { $_ -match "ad.anynet.id=" }; if ($AD_Line) { $AD_ID = $AD_Line.Split('=')[1] } }
-
-            $HTML += "<h2>System Information</h2><table>"
-            $HTML += "<tr><td>Computer Name:</td><td style='font-weight:bold;'>$env:COMPUTERNAME</td></tr>"
-            $HTML += "<tr><td>Computer Description:</td><td>$CompDesc</td></tr>"
-            $HTML += "<tr><td>Manufacturer:</td><td>$($CompSys.Manufacturer)</td></tr>"
-            $HTML += "<tr><td>Model:</td><td>$($CompSys.Model)</td></tr>"
-            $HTML += "<tr><td>Serial Number:</td><td>$($BIOS.SerialNumber)</td></tr>"
-            $HTML += "<tr><td>OS:</td><td>$($OS.Caption)</td></tr>"
-            $HTML += "<tr><td style='font-weight:bold; color:#0056b3;'>OS Version:</td><td style='font-weight:bold; color:#0056b3;'>$ExactOSVersion</td></tr>"
-            $HTML += "<tr><td>CPU:</td><td>$($CPU.Name) <br><span style='font-size:0.9em; color:#555;'>($($CPU.NumberOfCores) Cores, $($CPU.NumberOfLogicalProcessors) Logical Processors)</span></td></tr>"
-            $HTML += "<tr><td>RAM:</td><td>$RAM_Total GB</td></tr>"
-            $HTML += "<tr><td>RAM Details:</td><td>$RAM_Details</td></tr>"
-            $HTML += "<tr><td colspan='2' style='background-color:#e6f2ff; font-weight:bold; text-align:center;'>Remote Management Tools</td></tr>"
-            $TV_Combined = if ($TV_ID -ne "Not Installed" -and $TV_Ver) { "$TV_ID &nbsp;&nbsp;<span style='font-size:0.9em; color:#0056b3; font-weight:bold;'>(Version: $TV_Ver)</span>" } else { $TV_ID }
-            $HTML += "<tr><td>TeamViewer ID:</td><td>$TV_Combined</td></tr>"
-            $HTML += "<tr><td>AnyDesk ID:</td><td>$AD_ID</td></tr>"
-            $HTML += "</table>"
-
-            # --- Security & Antivirus Status ---
-            $CloudAV = @()
-            $HTML += "<h2>Security & Antivirus Status</h2><table><tr><th>Installed Antivirus</th><th>Version</th></tr>"
-            $SoftwarePaths = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
-            $AllSoftware = Get-ItemProperty $SoftwarePaths -ErrorAction SilentlyContinue | Where-Object DisplayName -ne $null
-            try {
-                $AVs = Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName AntivirusProduct -ErrorAction Stop
-                if ($AVs) {
-                    foreach ($AV in $AVs) {
-                        $AVName = $AV.displayName
-                        $AVVer = "Unknown"
-                        if ($AVName -match "Windows Defender" -or $AVName -match "Microsoft Defender") {
-                            $MpStatus = Get-MpComputerStatus -ErrorAction SilentlyContinue
-                            if ($MpStatus -and $MpStatus.AMProductVersion) { $AVVer = $MpStatus.AMProductVersion } else { $AVVer = "Built-in OS Version" }
-                        } else {
-                            $SearchName = $AVName -replace " Antivirus","" -replace " Security","" -replace " Endpoint",""
-                            $MatchedApp = $AllSoftware | Where-Object { $_.DisplayName -match [regex]::Escape($SearchName) } | Select-Object -First 1
-                            if ($MatchedApp -and $MatchedApp.DisplayVersion) { $AVVer = $MatchedApp.DisplayVersion } else {
-                                $BroadMatch = $AllSoftware | Where-Object { $_.DisplayName -like "*$SearchName*" } | Select-Object -First 1
-                                if ($BroadMatch -and $BroadMatch.DisplayVersion) { $AVVer = $BroadMatch.DisplayVersion }
-                            }
-                        }
-                        $HTML += "<tr><td style='font-weight:bold; color:green;'>$AVName</td><td style='font-weight:bold;'>$AVVer</td></tr>"
-                        $CloudAV += "$AVName (v.$AVVer)"
-                    }
-                } else { 
-                    $HTML += "<tr><td colspan='2' style='color:red; font-weight:bold;'>No Antivirus Detected</td></tr>"
-                }
-            } catch {
-                $HTML += "<tr><td colspan='2'>Windows Defender or WMI Error</td></tr>"
-                $CloudAV += "WMI Error / Defender"
-            }
-            $HTML += "</table>"
-
-            $CloudAV1 = if ($CloudAV.Count -ge 1) { $CloudAV[0] } else { "Not Detected" }
-            $CloudAV2 = if ($CloudAV.Count -ge 2) { $CloudAV[1..($CloudAV.Count-1)] -join " | " } else { "-" }
-
-            # --- System Health Metrics ---
-            $HTML += "<h2>System Health & Stability Metrics</h2>"
-            $Stability = (Get-CimInstance Win32_ReliabilityStabilityMetrics -ErrorAction SilentlyContinue | Sort-Object timegenerated -Descending | Select-Object -First 1).SystemStabilityIndex
-            $HealthScore = if ($null -ne $Stability) { "$([math]::Round($Stability, 1))/10" } else { "N/A" }
-            $BootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
-            $Uptime = (Get-Date) - $BootTime
-            $UptimeDays = $Uptime.Days
-            $UptimeStr = if ($UptimeDays -ge 14) { "$UptimeDays Days (Warning)" } else { "$UptimeDays Days" }
-
-            $Pending1 = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
-            $Pending2 = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-            $Pending3 = $null -ne (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue)
-            $NeedsReboot = if ($Pending1 -or $Pending2 -or $Pending3) { "Yes" } else { "No" }
-
-            $HColor1 = if ($Stability -ge 7) { "green" } elseif ($Stability -ge 4) { "#e68a00" } else { "red" }
-            $HColor2 = if ($UptimeDays -ge 14) { "red" } else { "green" }
-            $HColor3 = if ($NeedsReboot -eq "Yes") { "red" } else { "green" }
-
-            $HTML += "<table><tr><th>Stability Score (1-10)</th><th>System Uptime</th><th>Pending Reboot</th></tr>"
-            $HTML += "<tr><td style='font-weight:bold; color:$HColor1;'>$HealthScore</td><td style='font-weight:bold; color:$HColor2;'>$UptimeStr</td><td style='font-weight:bold; color:$HColor3;'>$NeedsReboot</td></tr></table>"
-
-            $ThaiErrors = @{ "41"="Unexpected Shutdown/Restart"; "55"="File System Corruption"; "129"="Storage Drive Timeout"; "153"="Storage I/O Error"; "1001"="BugCheck (Blue Screen)"; "6008"="Unexpected Shutdown"; "7000"="Service Control Manager Error"; "7009"="Service Timeout"; "7031"="Service Crash"; "10016"="DCOM Permission Error" }
-            $Events = Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2; StartTime=(Get-Date).AddDays(-7)} -ErrorAction SilentlyContinue
-            if ($Events) {
-                $HTML += "<h3>• Recent Critical Events (Top 5)</h3><table><tr><th>Timestamp</th><th>Event ID</th><th>Description</th><th>Classification</th></tr>"
-                $LatestEvents = $Events | Select-Object -First 5
-                foreach ($Event in $LatestEvents) {
-                    $Msg = $Event.Message -replace "`n", " " -replace "`r", ""
-                    if ($Msg.Length -gt 100) { $Msg = $Msg.Substring(0, 100) + "..." }
-                    $EvtID = $Event.Id.ToString()
-                    $Translate = if ($ThaiErrors.ContainsKey($EvtID)) { $ThaiErrors[$EvtID] } else { "Unclassified" }
-                    $HTML += "<tr><td>$($Event.TimeCreated.ToString('yyyy-MM-dd HH:mm'))</td><td>$EvtID</td><td style='font-size:0.9em; color:#555;'>$Msg</td><td style='font-weight:bold; color:#d9534f;'>$Translate</td></tr>"
-                }
-                $HTML += "</table>"
-            }
-
-            # --- Local Users ---
-            $CloudActiveUsers = @()
-            $HTML += "<h2>Local User Accounts & Privileges</h2><table><tr><th>Account Name</th><th>Role</th><th>Status</th><th>Last Logon</th></tr>"
-            $AdminGrp = (Get-LocalGroupMember -Group "Administrators" -ErrorAction SilentlyContinue).Name
-            Get-LocalUser | ForEach-Object {
-                $Role = if ($AdminGrp -match $_.Name) { "Administrator" } else { "Standard User" }
-                $HTML += "<tr><td>$($_.Name)</td><td style='font-weight:bold;'>$Role</td><td>$($_.Enabled)</td><td>$($_.LastLogon)</td></tr>"
-                if ($_.Enabled -eq $true) { $CloudActiveUsers += "$($_.Name) ($Role)" }
-            }
-            $FinalCloudUsers = $CloudActiveUsers -join " | "
-            $HTML += "</table>"
-
-            # --- Software ---
-            $HTML += "<h2>Installed Applications Inventory</h2><table><tr><th>Application Name</th><th>Version</th><th>Install Date</th></tr>"
-            $CloudSoftwareList = @()
-            Get-ItemProperty $SoftwarePaths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null } | Sort-Object DisplayName -Unique | ForEach-Object {
-                $HTML += "<tr><td>$($_.DisplayName)</td><td>$($_.DisplayVersion)</td><td>$($_.InstallDate)</td></tr>"
-                $CloudSoftwareList += "$($_.DisplayName)"
-            }
-            $FinalCloudSoftware = $CloudSoftwareList -join " | "
-            $HTML += "</table>"
-
-            # --- Printers & OPOS ---
-            $CloudPrinterList = @()
-            $HTML += "<h2>Peripheral Devices & OPOS Printers</h2><table><tr><th>Name / Logical Device</th><th>Driver Name</th><th>Port Configuration</th></tr>"
-            $StandardPrinters = Get-Printer | Sort-Object Name
-            foreach ($Printer in $StandardPrinters) {
-                $HTML += "<tr><td>$($Printer.Name)</td><td>$($Printer.DriverName)</td><td>$($Printer.PortName)</td></tr>"
-                $CloudPrinterList += "$($Printer.Name)"
-            }
-            $OPOS_Paths = @("HKLM:\SOFTWARE\OLEforRetail\ServiceOPOS\POSPrinter", "HKLM:\SOFTWARE\WOW6432Node\OLEforRetail\ServiceOPOS\POSPrinter", "HKLM:\SOFTWARE\Epson\EPSON OPOS\POSPrinter", "HKLM:\SOFTWARE\WOW6432Node\Epson\EPSON OPOS\POSPrinter", "HKLM:\SOFTWARE\Star Micronics\OPOS\POSPrinter", "HKLM:\SOFTWARE\WOW6432Node\Star Micronics\OPOS\POSPrinter")
-            $OPOS_Found = $false
-            foreach ($Path in $OPOS_Paths) {
-                if (Test-Path $Path) {
-                    $Devices = Get-ChildItem -Path $Path -ErrorAction SilentlyContinue
-                    foreach ($Dev in $Devices) {
-                        $DeviceName = $Dev.PSChildName
-                        $Port = (Get-ItemProperty -Path $Dev.PSPath -Name "PortName" -ErrorAction SilentlyContinue).PortName
-                        if (-not $Port) { $Port = "OPOS Direct" }
-                        $HTML += "<tr><td style='font-weight:bold; color:#0056b3;'>[OPOS] $DeviceName</td><td style='color:#0056b3;'>OPOS POSPrinter Device</td><td style='color:#0056b3;'>$Port</td></tr>"
-                        $CloudPrinterList += "[OPOS] $DeviceName"
-                        $OPOS_Found = $true
-                    }
-                }
-            }
-            if (-not $OPOS_Found -and $StandardPrinters.Count -eq 0) { $HTML += "<tr><td colspan='3' style='text-align:center; color:red;'>No Printers Detected</td></tr>" }
-            $HTML += "</table>"
-            $FinalCloudPrinters = $CloudPrinterList -join " | "
-
-            # --- Disks ---
-            $CloudDiskList = @()
-            $HTML += "<h2>Physical Disk Health & S.M.A.R.T. Status</h2><table><tr><th>Model</th><th>Media Type</th><th>Health Status</th><th>Capacity (GB)</th><th>Wear Indicator</th><th>R/W Errors</th><th>Power-On Hours</th></tr>"
-            try {
-                $Disks = Get-PhysicalDisk -ErrorAction Stop
-                $DiskCount = 1
-                if ($Disks) {
-                    foreach ($Disk in $Disks) {
-                        $SizeGB = [math]::Round($Disk.Size / 1GB, 2)
-                        $Rel = Get-StorageReliabilityCounter -PhysicalDisk $Disk -ErrorAction SilentlyContinue
-                        $POH = if ($Rel -and $Rel.PowerOnHours) { "$($Rel.PowerOnHours) hrs" } else { "N/A" }
-                        $Wear = if ($Rel -and $Rel.Wear -ne $null) { "$($Rel.Wear)%" } else { "N/A" }
-                        $RErr = if ($Rel -and $Rel.ReadErrorsTotal -ne $null) { $Rel.ReadErrorsTotal } else { 0 }
-                        $WErr = if ($Rel -and $Rel.WriteErrorsTotal -ne $null) { $Rel.WriteErrorsTotal } else { 0 }
-                        $Errors = if ($RErr -gt 0 -or $WErr -gt 0) { "<span style='color:red; font-weight:bold;'>R: $RErr / W: $WErr</span>" } else { "<span style='color:green; font-weight:bold;'>0 / 0</span>" }
-                        $HStatus = $Disk.HealthStatus
-                        $HColor = if ($HStatus -eq 'Healthy') { "green" } elseif ($HStatus -eq 'Warning') { "#e68a00" } else { "red" }
-                        
-                        $HTML += "<tr><td>$($Disk.Model)</td><td>$($Disk.MediaType)</td><td style='color:$HColor; font-weight:bold;'>$HStatus</td><td>$SizeGB</td><td style='font-weight:bold;'>$Wear</td><td>$Errors</td><td>$POH</td></tr>"
-                        $CloudDiskList += "[Disk $DiskCount] Model: $($Disk.Model) | Type: $($Disk.MediaType) | Status: $HStatus | Size: $SizeGB GB | Wear: $Wear"
-                        $DiskCount++
-                    }
-                } else { 
-                    $HTML += "<tr><td colspan='7' style='text-align:center; color:red;'>Disk Information Unavailable</td></tr>"
-                    $CloudDiskList += "Not Detected"
-                }
-            } catch {
-                $WmiDisks = Get-WmiObject Win32_DiskDrive -ErrorAction SilentlyContinue
-                $DiskCount = 1
-                if ($WmiDisks) {
-                    foreach ($wDisk in $WmiDisks) {
-                        $SizeGB = [math]::Round($wDisk.Size / 1GB, 2)
-                        $HStatus = if ($wDisk.Status -eq "OK") { "Healthy" } else { $wDisk.Status }
-                        $HColor = if ($HStatus -eq 'Healthy') { "green" } else { "red" }
-                        $HTML += "<tr><td>$($wDisk.Model)</td><td>N/A</td><td style='color:$HColor; font-weight:bold;'>$HStatus</td><td>$SizeGB</td><td>N/A</td><td>N/A</td><td>N/A</td></tr>"
-                        $CloudDiskList += "[Disk $DiskCount] Model: $($wDisk.Model) | Status: $HStatus | Size: $SizeGB GB"
-                        $DiskCount++
-                    }
-                } else { 
-                    $HTML += "<tr><td colspan='7' style='text-align:center; color:red;'>WMI Error / Access Denied</td></tr>"
-                    $CloudDiskList += "WMI Error / Access Denied"
-                }
-            }
-            $HTML += "</table>"
-            $CloudDiskHealth = $CloudDiskList -join "`n"
-
-            # --- Volumes ---
-            $HTML += "<h2>Logical Volume Usage</h2><table><tr><th>Drive Letter</th><th>Volume Label</th><th>Total Capacity (GB)</th><th>Used Space (GB)</th><th>Free Space (GB)</th><th>Free Space (%)</th></tr>"
-            Get-Volume | Sort-Object DriveLetter -Descending | ForEach-Object {
-                $Letter = if ($_.DriveLetter) { $_.DriveLetter } else { "System/Hidden" }
-                $Label = if ($_.FileSystemLabel) { $_.FileSystemLabel } else { "N/A" }
-                $Total = [math]::Round($_.Size / 1GB, 2)
-                $Free = [math]::Round($_.SizeRemaining / 1GB, 2)
-                $Used = $Total - $Free
-                $PctFree = if ($Total -gt 0) { [math]::Round(($Free / $Total) * 100, 2) } else { 0 }
-                $HTML += "<tr><td>$Letter</td><td>$Label</td><td>$Total</td><td>$Used</td><td>$Free</td><td>$PctFree</td></tr>"
-            }
-            $HTML += "</table>"
-
-            # --- Network ---
-            $Net = Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPAddress -ne $null -and $_.IPAddress -notmatch ":" } | Select-Object -First 1
-            $HTML += "<h2>Network Configuration</h2><table>"
-            $HTML += "<tr><td>IP Address:</td><td>$($Net.IPAddress[0])</td></tr>"
-            $HTML += "<tr><td style='font-weight:bold;'>MAC Address:</td><td style='font-weight:bold;'>$($Net.MACAddress)</td></tr>"
-            $HTML += "<tr><td>Subnet Mask:</td><td>$($Net.IPSubnet[0])</td></tr>"
-            $HTML += "<tr><td>Default Gateway:</td><td>$($Net.DefaultIPGateway[0])</td></tr>"
-            $HTML += "<tr><td>DNS Servers:</td><td>$($Net.DNSServerSearchOrder -join ', ')</td></tr></table>"
-
-            # --- Deep Scan ---
-            if ($DeepScan) {
-                $SpeedtestDir = "$env:TEMP\speedtest_cli"
-                $ExePath = "$SpeedtestDir\speedtest.exe"
-                try {
-                    if (-not (Test-Path $ExePath)) {
-                        New-Item -ItemType Directory -Force -Path $SpeedtestDir | Out-Null
-                        Invoke-WebRequest -Uri "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-win64.zip" -OutFile "$SpeedtestDir\speedtest.zip" -ErrorAction Stop
-                        Expand-Archive -Path "$SpeedtestDir\speedtest.zip" -DestinationPath $SpeedtestDir -Force -ErrorAction Stop
-                    }
-                } catch { }
-
-                $HTML += "<h2>Network Performance Analysis</h2><table><tr><th>Download Bandwidth</th><th>Upload Bandwidth</th></tr>"
-                try {
-                    $SpeedJson = & $ExePath --accept-license --accept-gdpr -f json 2>$null
-                    if ($SpeedJson) {
-                        $SpeedResult = $SpeedJson | ConvertFrom-Json
-                        $DL = "$([math]::Round($SpeedResult.download.bandwidth / 125000, 2)) Mbps"
-                        $UL = "$([math]::Round($SpeedResult.upload.bandwidth / 125000, 2)) Mbps"
-                        $HTML += "<tr><td style='font-weight:bold; color:green;'>$DL</td><td style='font-weight:bold; color:green;'>$UL</td></tr>"
-                    } else { throw "No response" }
-                } catch {
-                    $HTML += "<tr><td colspan='2' style='color:red; font-weight:bold;'>Speed test execution failed.</td></tr>"
-                }
-                $HTML += "</table>"
-                Remove-Item -Path $SpeedtestDir -Recurse -Force -ErrorAction SilentlyContinue
-                
-                $HTML += "<h2>Local Network Device Discovery</h2><table><tr><th>IP Address</th><th>Hostname</th><th>Status</th></tr>"
-                $BaseIP = $Net.IPAddress[0].Substring(0, $Net.IPAddress[0].LastIndexOf('.'))
-                $PingTasks = 1..254 | ForEach-Object {
-                    $TargetIP = "$BaseIP.$_"
-                    $Ping = [System.Net.NetworkInformation.Ping]::new()
-                    $Ping.SendPingAsync($TargetIP, 150)
-                }
-                [Threading.Tasks.Task]::WaitAll($PingTasks)
-                foreach ($Task in $PingTasks) {
-                    if ($Task.Result.Status -eq 'Success') {
-                        try { $HostName = [System.Net.Dns]::GetHostEntry($Task.Result.Address).HostName } catch { $HostName = "N/A" }
-                        $HTML += "<tr><td>$($Task.Result.Address)</td><td>$HostName</td><td style='color:green;'>Online</td></tr>"
-                    }
-                }
-                $HTML += "</table>"
-            } else {
-                $HTML += "<h2>Network Performance & Discovery</h2><p style='color:gray; padding-left:20px;'><i>Execution skipped. (Requires DeepScan).</i></p>"
-            }
-
-            # ==========================================
-            # 3.4 DATA SYNCHRONIZATION ENGINE (DELTA UPDATE)
-            # ==========================================
-            $CurrentData = [ordered]@{
-                BU             = $BU
-                BranchID       = $BranchID
-                ComputerName   = $env:COMPUTERNAME
-                ComputerDesc   = $CompDesc
-                Manufacturer   = $CompSys.Manufacturer
-                Model          = $CompSys.Model
-                SerialNumber   = $BIOS.SerialNumber
-                OSVersion      = $CombinedOS
-                CPU            = $CPU.Name
-                RAM            = "$RAM_Total GB"
-                IPAddress      = $Net.IPAddress[0]
-                MACAddress     = $Net.MACAddress
-                Antivirus1     = $CloudAV1
-                Antivirus2     = $CloudAV2
-                DiskHealth     = $CloudDiskHealth
-                StabilityScore = $HealthScore
-                Uptime         = $UptimeStr
-                PendingReboot  = $NeedsReboot
-                TeamViewerID   = $TV_ID
-                AnyDeskID      = $AD_ID
-                ActiveUsers    = $FinalCloudUsers
-                AllPrinters    = $FinalCloudPrinters
-                AllSoftware    = $FinalCloudSoftware
-                AgentVersion   = $AgentVersion
-            }
-
-            $SyncType = "FullSync"
-            $FinalPayload = @{}
-
-            if (Test-Path $StateFile) {
-                try {
-                    $LastState = Get-Content $StateFile -Raw | ConvertFrom-Json
-                    $ChangesFound = $false
-                    
-                    $FinalPayload["SerialNumber"] = $CurrentData["SerialNumber"]
-                    $FinalPayload["ComputerName"] = $CurrentData["ComputerName"]
-                    $FinalPayload["BranchID"]     = $CurrentData["BranchID"]
-                    $FinalPayload["BU"]           = $CurrentData["BU"]
-
-                    foreach ($Key in $CurrentData.Keys) {
-                        $CurrentVal = [string]$CurrentData[$Key]
-                        $LastVal    = [string]$LastState.$Key
-                        if ($CurrentVal -cne $LastVal) {
-                            $FinalPayload[$Key] = $CurrentVal
-                            $ChangesFound = $true
-                        }
-                    }
-                    $SyncType = if ($ChangesFound) { "DeltaUpdate" } else { "Heartbeat" }
-                    $FinalPayload["Type"] = $SyncType
-                } catch { $SyncType = "FullSync" }
-            }
-
-            if ($SyncType -eq "FullSync") {
-                $FinalPayload = $CurrentData
-                $FinalPayload["Type"] = "FullSync"
-            }
-
-            # ==========================================
-            # 3.5 CLOUD DATA TRANSMISSION & C2
-            # ==========================================
-            $MaxRetries = 6        
-            $Attempt = 0
-            $IsSuccess = $false
-
-            $JsonPayload = $FinalPayload | ConvertTo-Json -Depth 5
-            $Utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($JsonPayload)
-
-            while ($Attempt -lt $MaxRetries -and -not $IsSuccess) {
-                $Attempt++
-                try {
-                    $SyncTimer = [System.Diagnostics.Stopwatch]::StartNew()
-                    $Response = Invoke-RestMethod -Uri $GoogleScriptURL -Method Post -Body $Utf8Bytes -ContentType "application/json; charset=utf-8" -TimeoutSec 30
-                    $SyncTimer.Stop()
-                    $IsSuccess = $true
-                    
-                    $ElapsedSec = [math]::Round($SyncTimer.Elapsed.TotalSeconds, 2)
-                    $PayloadSizeKB = [math]::Round($Utf8Bytes.Length / 1KB, 2)
-                    "$(Get-Date) - [Cloud Sync] Attempt $($Attempt): Success. Size: $PayloadSizeKB KB | Time: $ElapsedSec s." | Out-File "$WorkDir\SAM_Log.txt" -Append
-
-                    if ($Response -match "Success" -or $Response -match "Ack" -or $Response -match "Missing Row") {
-                        $CurrentData | ConvertTo-Json -Depth 5 | Out-File $StateFile -Encoding UTF8
-                        
-                        # --- C2 COMMAND PROCESSING & SELF-HEALING ---
-                        if ($Response -match "CMD:(.+)") {
-                            $RemoteCmd = $matches[1].Trim()
-                            if ($RemoteCmd -ne "NONE" -and $RemoteCmd -ne "") {
-                                "$(Get-Date) - C2 Command Received: $RemoteCmd" | Out-File "$WorkDir\SAM_Log.txt" -Append
-                                
-                                $CommandList = $RemoteCmd -split "&&"
-                                foreach ($SingleCmd in $CommandList) {
-                                    $ParsedCmd = $SingleCmd.Trim()
-                                    switch -Regex ($ParsedCmd) {
-                                        "^SHUTDOWN$"   { Start-Process "shutdown.exe" -ArgumentList "/s /t 60 /c `"IT Support Remote Command`"" -WindowStyle Hidden }
-                                        "^RESTART$"    { Start-Process "shutdown.exe" -ArgumentList "/r /t 60 /c `"IT Support Remote Command`"" -WindowStyle Hidden }
-                                        "^CLEAR_TEMP$" { Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue }
-                                        
-                                        # [NEW] SELF-HEALING
-                                        "^FORCE_SYNC$" { 
-                                            Remove-Item -Path $StateFile -Force -ErrorAction SilentlyContinue
-                                            "$(Get-Date) - [Self-Healing] State cleared. Forcing Full Sync next cycle." | Out-File "$WorkDir\SAM_Log.txt" -Append
-                                        }
-                                        
-                                        # TASK PAYLOAD MODULE
-                                        "^RUN_TASK:(.+)$" {
-                                            $TaskData = $matches[1].Trim()
-                                            $TaskParts = $TaskData -split '\|'
-                                            $TaskFileName = $TaskParts[0].Trim()
-                                            $TaskArgs = if ($TaskParts.Count -gt 1) { $TaskParts[1..($TaskParts.Count-1)] } else { @() }
-                                            
-                                            $TaskUrl = "$TaskBaseUrl$TaskFileName"
-                                            $LocalTaskPath = "$env:TEMP\$TaskFileName"
-                                            
-                                            try {
-                                                Invoke-WebRequest -Uri $TaskUrl -OutFile $LocalTaskPath -UseBasicParsing -ErrorAction Stop
-                                                if (Test-Path $LocalTaskPath) {
-                                                    $ArgString = ($TaskArgs | ForEach-Object { "`"$_`"" }) -join " "
-                                                    $ProcessArgs = "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"& { try { & '$LocalTaskPath' $ArgString } finally { Start-Sleep -Seconds 2; Remove-Item -Path '$LocalTaskPath' -Force -ErrorAction SilentlyContinue } }`""
-                                                    Start-Process powershell.exe -ArgumentList $ProcessArgs -WindowStyle Hidden
-                                                }
-                                            } catch { "$(Get-Date) - Task Failed: $TaskFileName" | Out-File "$WorkDir\SAM_Log.txt" -Append }
-                                        }
-                                        Default { "$(Get-Date) - Unknown Command: $ParsedCmd" | Out-File "$WorkDir\SAM_Log.txt" -Append }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch { 
-                    if ($null -ne $SyncTimer) { $SyncTimer.Stop() }
-                    $ElapsedFail = if ($null -ne $SyncTimer) { [math]::Round($SyncTimer.Elapsed.TotalSeconds, 2) } else { 0 }
-                    
-                    # Random Retry (5-15 mins)
-                    $RandomRetry = Get-Random -Minimum 300 -Maximum 900
-                    "$(Get-Date) - [Sync Error] Attempt $($Attempt) Failed ($ElapsedFail s). Retrying in $RandomRetry seconds." | Out-File "$WorkDir\SAM_Log.txt" -Append
-                    
-                    if ($Attempt -lt $MaxRetries) { Start-Sleep -Seconds $RandomRetry } 
-                    else { $HTML += "<h3 style='color:red; text-align:center;'>⚠️ CLOUD SYNC FAILED</h3>" }
-                }
-            }
-
-            # Write HTML Report
-            $HTML += "</body></html>"
-            [System.IO.File]::WriteAllText($ReportPath, $HTML, [System.Text.Encoding]::UTF8)
-            if (-not $Silent) { Invoke-Item $ReportPath }
-        }
-    }
-
-    # --- Phase 4: Deep Sleep (จำศีลข้ามวันสำหรับเครื่อง 24/7) ---
-    if ($Silent) {
-        $Now = Get-Date
-        $Next8AM = Get-Date -Hour 8 -Minute 0 -Second 0
-        
-        # ถ้าเลย 8 โมงเช้าของวันนี้ไปแล้ว ให้นับไป 8 โมงเช้าของวันพรุ่งนี้
-        if ($Now.Hour -ge 8) { $Next8AM = $Next8AM.AddDays(1) }
-        
-        $SleepSeconds = [int]($Next8AM - $Now).TotalSeconds
-        if ($SleepSeconds -lt 0) { $SleepSeconds = 60 } # Fallback 
-        
-        "$(Get-Date) - [Immortal Loop] Cycle complete. Hibernating for $SleepSeconds seconds until 08:00 AM." | Out-File "$WorkDir\SAM_Log.txt" -Append
-        Start-Sleep -Seconds $SleepSeconds
-    } else {
-        "$(Get-Date) - [Manual Mode] Execution complete. Exiting." | Out-File "$WorkDir\SAM_Log.txt" -Append
-        break
     }
 }
+
+# --- Smart Queueing (Adaptive Jitter) ---
+if ($Silent) {
+    if ($CurrentTime.Hour -ge 8 -and $CurrentTime.Hour -lt 14) {
+        $EndTime = Get-Date -Hour 14 -Minute 0 -Second 0
+        $RemainingSeconds = ($EndTime - $CurrentTime).TotalSeconds
+        $RandomWait = Get-Random -Minimum 10 -Maximum [int]$RemainingSeconds
+        "$(Get-Date) - [Queue] Prime Window. Delaying $RandomWait seconds." | Out-File "$WorkDir\SAM_Log.txt" -Append
+        Start-Sleep -Seconds $RandomWait
+    }
+    elseif ($CurrentTime.Hour -ge 14) {
+        $RandomWait = Get-Random -Minimum 60 -Maximum 300
+        "$(Get-Date) - [Queue] Latecomer. Quick sync in $RandomWait seconds." | Out-File "$WorkDir\SAM_Log.txt" -Append
+        Start-Sleep -Seconds $RandomWait
+    }
+    else {
+        $RandomWait = Get-Random -Minimum 300 -Maximum 600
+        "$(Get-Date) - [Queue] Early bird. Sync in $RandomWait seconds." | Out-File "$WorkDir\SAM_Log.txt" -Append
+        Start-Sleep -Seconds $RandomWait
+    }
+}
+
+# --- 3.1 NETWORK CONNECTIVITY CHECK ---
+$MaxWaitLoops = 24
+$CurrentLoop = 0
+$InternetReady = $false
+
+while ($CurrentLoop -lt $MaxWaitLoops -and -not $InternetReady) {
+    try {
+        $NetCheck = Invoke-WebRequest -Uri "http://www.msftconnecttest.com/connecttest.txt" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+        if ($NetCheck.Content -match "Microsoft Connect Test") { $InternetReady = $true } else { throw "Captive Portal Detected" }
+    } catch {
+        $CurrentLoop++
+        if (-not $Silent) { Write-Host "[Warning] Network offline. Retrying in 5 minutes... ($CurrentLoop/$MaxWaitLoops)" -ForegroundColor Yellow }
+        Start-Sleep -Seconds 300 
+    }
+}
+
+if (-not $InternetReady) { 
+    "$(Get-Date) - [Offline] No network after 2 hours. Exiting." | Out-File "$WorkDir\SAM_Log.txt" -Append
+    exit
+} 
+
+# --- 3.2 AUTOMATED AGENT UPDATE MODULE (OTA) ---
+if (-not $env:SAM_JUST_UPDATED) { 
+    Try {
+        $RawVersion = (Invoke-RestMethod -Uri $VersionUrl -UseBasicParsing -ErrorAction Stop)
+        $LatestVersion = [regex]::Match($RawVersion, '(\d+\.\d+\.\d+)').Value
+        if ([version]$LatestVersion -gt [version]$CurrentVersion) {
+            Invoke-WebRequest -Uri $AgentUrl -OutFile $TempPath -ErrorAction Stop
+            if ((Get-Item $TempPath).Length -gt 1000) { 
+                $RunMode = if ($Silent) { "-Silent" } else { "" }
+                $SwapCmd = "cmd /c timeout /t 2 > nul && del `"$ScriptPath`" && move `"$TempPath`" `"$ScriptPath`" && set SAM_JUST_UPDATED=1 && powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" $RunMode"
+                Start-Process cmd.exe -ArgumentList "/c $SwapCmd" -WindowStyle Hidden
+                exit 
+            }
+        }
+    } Catch { }
+}
+
+# ==========================================
+# 3.3 REPORT GENERATION & AUTOMATED HOUSEKEEPING
+# ==========================================
+$CleanBranchName = $BranchID -replace '[\\/:*?"<>|]', '-'
+$ReportPrefix = "$($BU)_$($CleanBranchName)_$($env:COMPUTERNAME)"
+$ReportPath = "$WorkDir\$ReportPrefix`_$(Get-Date -Format 'yyyy-MM-dd').html"
+
+Get-ChildItem -Path $WorkDir -Filter "$ReportPrefix*.html" | Where-Object { $_.FullName -ne $ReportPath } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+$CSS = "<style>body{font-family:'Leelawadee UI', Tahoma, sans-serif;margin:20px}table{border-collapse:collapse;width:95%;margin:auto auto 25px;box-shadow:0 2px 3px rgba(0,0,0,.1)}th,td{border:1px solid #ddd;text-align:left;padding:8px}th{background-color:#f2f2f2}tr:nth-child(even){background-color:#f9f9f9}h1,h2,h3{text-align:center;color:#333;}h1{border-bottom:2px solid #eee;padding-bottom:10px}h3{font-size:1.2em; color:#0056b3; text-align:left; margin-left: 2.5%;}</style>"
+$HTML = "<!DOCTYPE html><html><head><meta charset='UTF-8'>$CSS</head><body><h1>System Audit Report for $env:COMPUTERNAME<br><span style='font-size:0.6em; color:#666;'>(BU: $BU | Branch: $BranchID | Agent: $AgentVersion)</span></h1>"
+
+# --- System Specifications ---
+$OS = Get-CimInstance Win32_OperatingSystem
+$RegOS = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+$DisplayVer = if ($RegOS.DisplayVersion) { $RegOS.DisplayVersion } else { $RegOS.ReleaseId }
+$ExactOSVersion = "Version $DisplayVer (OS Build $($RegOS.CurrentBuild).$($RegOS.UBR))"
+$CombinedOS = "$($OS.Caption) ($ExactOSVersion)"
+
+$CompSys = Get-CimInstance Win32_ComputerSystem
+$BIOS = Get-CimInstance Win32_BIOS
+$CPU = Get-CimInstance Win32_Processor
+$RAM_Items = Get-CimInstance Win32_PhysicalMemory
+$RAM_Total = [math]::Round(($RAM_Items | Measure-Object -Property Capacity -Sum).Sum / 1GB, 2)
+$RAM_Details = ($RAM_Items | ForEach-Object { "$([math]::Round($_.Capacity/1GB,0)) GB @ $(if ($_.ConfiguredClockSpeed) { $_.ConfiguredClockSpeed } else { $_.Speed }) MHz" }) -join "<br>"
+$CompDesc = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\lanmanserver\parameters" -Name "srvcomment" -ErrorAction SilentlyContinue).srvcomment
+
+$TV_Reg = Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\TeamViewer" -ErrorAction SilentlyContinue
+$TV_ID = if ($TV_Reg.ClientID) { $TV_Reg.ClientID } else { "Not Installed" }
+$TV_Ver = if ($TV_Reg.Version) { $TV_Reg.Version } else { "" }
+
+$AD_Conf = "$env:ProgramData\AnyDesk\system.conf"
+$AD_ID = "Not Installed"
+if (Test-Path $AD_Conf) { $AD_Line = Get-Content $AD_Conf | Where-Object { $_ -match "ad.anynet.id=" }; if ($AD_Line) { $AD_ID = $AD_Line.Split('=')[1] } }
+
+$HTML += "<h2>System Information</h2><table>"
+$HTML += "<tr><td>Computer Name:</td><td style='font-weight:bold;'>$env:COMPUTERNAME</td></tr>"
+$HTML += "<tr><td>Computer Description:</td><td>$CompDesc</td></tr>"
+$HTML += "<tr><td>Manufacturer:</td><td>$($CompSys.Manufacturer)</td></tr>"
+$HTML += "<tr><td>Model:</td><td>$($CompSys.Model)</td></tr>"
+$HTML += "<tr><td>Serial Number:</td><td>$($BIOS.SerialNumber)</td></tr>"
+$HTML += "<tr><td>OS:</td><td>$($OS.Caption)</td></tr>"
+$HTML += "<tr><td style='font-weight:bold; color:#0056b3;'>OS Version:</td><td style='font-weight:bold; color:#0056b3;'>$ExactOSVersion</td></tr>"
+$HTML += "<tr><td>CPU:</td><td>$($CPU.Name) <br><span style='font-size:0.9em; color:#555;'>($($CPU.NumberOfCores) Cores, $($CPU.NumberOfLogicalProcessors) Logical Processors)</span></td></tr>"
+$HTML += "<tr><td>RAM:</td><td>$RAM_Total GB</td></tr>"
+$HTML += "<tr><td>RAM Details:</td><td>$RAM_Details</td></tr>"
+$HTML += "<tr><td colspan='2' style='background-color:#e6f2ff; font-weight:bold; text-align:center;'>Remote Management Tools</td></tr>"
+$TV_Combined = if ($TV_ID -ne "Not Installed" -and $TV_Ver) { "$TV_ID &nbsp;&nbsp;<span style='font-size:0.9em; color:#0056b3; font-weight:bold;'>(Version: $TV_Ver)</span>" } else { $TV_ID }
+$HTML += "<tr><td>TeamViewer ID:</td><td>$TV_Combined</td></tr>"
+$HTML += "<tr><td>AnyDesk ID:</td><td>$AD_ID</td></tr>"
+$HTML += "</table>"
+
+# --- Security & Antivirus Status ---
+$CloudAV = @()
+$HTML += "<h2>Security & Antivirus Status</h2><table><tr><th>Installed Antivirus</th><th>Version</th></tr>"
+$SoftwarePaths = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
+$AllSoftware = Get-ItemProperty $SoftwarePaths -ErrorAction SilentlyContinue | Where-Object DisplayName -ne $null
+try {
+    $AVs = Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName AntivirusProduct -ErrorAction Stop
+    if ($AVs) {
+        foreach ($AV in $AVs) {
+            $AVName = $AV.displayName
+            $AVVer = "Unknown"
+            if ($AVName -match "Windows Defender" -or $AVName -match "Microsoft Defender") {
+                $MpStatus = Get-MpComputerStatus -ErrorAction SilentlyContinue
+                if ($MpStatus -and $MpStatus.AMProductVersion) { $AVVer = $MpStatus.AMProductVersion } else { $AVVer = "Built-in OS Version" }
+            } else {
+                $SearchName = $AVName -replace " Antivirus","" -replace " Security","" -replace " Endpoint",""
+                $MatchedApp = $AllSoftware | Where-Object { $_.DisplayName -match [regex]::Escape($SearchName) } | Select-Object -First 1
+                if ($MatchedApp -and $MatchedApp.DisplayVersion) { $AVVer = $MatchedApp.DisplayVersion } else {
+                    $BroadMatch = $AllSoftware | Where-Object { $_.DisplayName -like "*$SearchName*" } | Select-Object -First 1
+                    if ($BroadMatch -and $BroadMatch.DisplayVersion) { $AVVer = $BroadMatch.DisplayVersion }
+                }
+            }
+            $HTML += "<tr><td style='font-weight:bold; color:green;'>$AVName</td><td style='font-weight:bold;'>$AVVer</td></tr>"
+            $CloudAV += "$AVName (v.$AVVer)"
+        }
+    } else { 
+        $HTML += "<tr><td colspan='2' style='color:red; font-weight:bold;'>No Antivirus Detected</td></tr>"
+    }
+} catch {
+    $HTML += "<tr><td colspan='2'>Windows Defender or WMI Error</td></tr>"
+    $CloudAV += "WMI Error / Defender"
+}
+$HTML += "</table>"
+
+$CloudAV1 = if ($CloudAV.Count -ge 1) { $CloudAV[0] } else { "Not Detected" }
+$CloudAV2 = if ($CloudAV.Count -ge 2) { $CloudAV[1..($CloudAV.Count-1)] -join " | " } else { "-" }
+
+# --- System Health Metrics ---
+$HTML += "<h2>System Health & Stability Metrics</h2>"
+$Stability = (Get-CimInstance Win32_ReliabilityStabilityMetrics -ErrorAction SilentlyContinue | Sort-Object timegenerated -Descending | Select-Object -First 1).SystemStabilityIndex
+$HealthScore = if ($null -ne $Stability) { "$([math]::Round($Stability, 1))/10" } else { "N/A" }
+$BootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+$Uptime = (Get-Date) - $BootTime
+$UptimeDays = $Uptime.Days
+$UptimeStr = if ($UptimeDays -ge 14) { "$UptimeDays Days (Warning)" } else { "$UptimeDays Days" }
+
+$Pending1 = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
+$Pending2 = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
+$Pending3 = $null -ne (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue)
+$NeedsReboot = if ($Pending1 -or $Pending2 -or $Pending3) { "Yes" } else { "No" }
+
+$HColor1 = if ($Stability -ge 7) { "green" } elseif ($Stability -ge 4) { "#e68a00" } else { "red" }
+$HColor2 = if ($UptimeDays -ge 14) { "red" } else { "green" }
+$HColor3 = if ($NeedsReboot -eq "Yes") { "red" } else { "green" }
+
+$HTML += "<table><tr><th>Stability Score (1-10)</th><th>System Uptime</th><th>Pending Reboot</th></tr>"
+$HTML += "<tr><td style='font-weight:bold; color:$HColor1;'>$HealthScore</td><td style='font-weight:bold; color:$HColor2;'>$UptimeStr</td><td style='font-weight:bold; color:$HColor3;'>$NeedsReboot</td></tr></table>"
+
+$ThaiErrors = @{ "41"="Unexpected Shutdown/Restart"; "55"="File System Corruption"; "129"="Storage Drive Timeout"; "153"="Storage I/O Error"; "1001"="BugCheck (Blue Screen)"; "6008"="Unexpected Shutdown"; "7000"="Service Control Manager Error"; "7009"="Service Timeout"; "7031"="Service Crash"; "10016"="DCOM Permission Error" }
+$Events = Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2; StartTime=(Get-Date).AddDays(-7)} -ErrorAction SilentlyContinue
+if ($Events) {
+    $HTML += "<h3>• Recent Critical Events (Top 5)</h3><table><tr><th>Timestamp</th><th>Event ID</th><th>Description</th><th>Classification</th></tr>"
+    $LatestEvents = $Events | Select-Object -First 5
+    foreach ($Event in $LatestEvents) {
+        $Msg = $Event.Message -replace "`n", " " -replace "`r", ""
+        if ($Msg.Length -gt 100) { $Msg = $Msg.Substring(0, 100) + "..." }
+        $EvtID = $Event.Id.ToString()
+        $Translate = if ($ThaiErrors.ContainsKey($EvtID)) { $ThaiErrors[$EvtID] } else { "Unclassified" }
+        $HTML += "<tr><td>$($Event.TimeCreated.ToString('yyyy-MM-dd HH:mm'))</td><td>$EvtID</td><td style='font-size:0.9em; color:#555;'>$Msg</td><td style='font-weight:bold; color:#d9534f;'>$Translate</td></tr>"
+    }
+    $HTML += "</table>"
+}
+
+# --- Local Users ---
+$CloudActiveUsers = @()
+$HTML += "<h2>Local User Accounts & Privileges</h2><table><tr><th>Account Name</th><th>Role</th><th>Status</th><th>Last Logon</th></tr>"
+$AdminGrp = (Get-LocalGroupMember -Group "Administrators" -ErrorAction SilentlyContinue).Name
+Get-LocalUser | ForEach-Object {
+    $Role = if ($AdminGrp -match $_.Name) { "Administrator" } else { "Standard User" }
+    $HTML += "<tr><td>$($_.Name)</td><td style='font-weight:bold;'>$Role</td><td>$($_.Enabled)</td><td>$($_.LastLogon)</td></tr>"
+    if ($_.Enabled -eq $true) { $CloudActiveUsers += "$($_.Name) ($Role)" }
+}
+$FinalCloudUsers = $CloudActiveUsers -join " | "
+$HTML += "</table>"
+
+# --- Software ---
+$HTML += "<h2>Installed Applications Inventory</h2><table><tr><th>Application Name</th><th>Version</th><th>Install Date</th></tr>"
+$CloudSoftwareList = @()
+Get-ItemProperty $SoftwarePaths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null } | Sort-Object DisplayName -Unique | ForEach-Object {
+    $HTML += "<tr><td>$($_.DisplayName)</td><td>$($_.DisplayVersion)</td><td>$($_.InstallDate)</td></tr>"
+    $CloudSoftwareList += "$($_.DisplayName)"
+}
+$FinalCloudSoftware = $CloudSoftwareList -join " | "
+$HTML += "</table>"
+
+# --- Printers & OPOS ---
+$CloudPrinterList = @()
+$HTML += "<h2>Peripheral Devices & OPOS Printers</h2><table><tr><th>Name / Logical Device</th><th>Driver Name</th><th>Port Configuration</th></tr>"
+$StandardPrinters = Get-Printer | Sort-Object Name
+foreach ($Printer in $StandardPrinters) {
+    $HTML += "<tr><td>$($Printer.Name)</td><td>$($Printer.DriverName)</td><td>$($Printer.PortName)</td></tr>"
+    $CloudPrinterList += "$($Printer.Name)"
+}
+$OPOS_Paths = @("HKLM:\SOFTWARE\OLEforRetail\ServiceOPOS\POSPrinter", "HKLM:\SOFTWARE\WOW6432Node\OLEforRetail\ServiceOPOS\POSPrinter", "HKLM:\SOFTWARE\Epson\EPSON OPOS\POSPrinter", "HKLM:\SOFTWARE\WOW6432Node\Epson\EPSON OPOS\POSPrinter", "HKLM:\SOFTWARE\Star Micronics\OPOS\POSPrinter", "HKLM:\SOFTWARE\WOW6432Node\Star Micronics\OPOS\POSPrinter")
+$OPOS_Found = $false
+foreach ($Path in $OPOS_Paths) {
+    if (Test-Path $Path) {
+        $Devices = Get-ChildItem -Path $Path -ErrorAction SilentlyContinue
+        foreach ($Dev in $Devices) {
+            $DeviceName = $Dev.PSChildName
+            $Port = (Get-ItemProperty -Path $Dev.PSPath -Name "PortName" -ErrorAction SilentlyContinue).PortName
+            if (-not $Port) { $Port = "OPOS Direct" }
+            $HTML += "<tr><td style='font-weight:bold; color:#0056b3;'>[OPOS] $DeviceName</td><td style='color:#0056b3;'>OPOS POSPrinter Device</td><td style='color:#0056b3;'>$Port</td></tr>"
+            $CloudPrinterList += "[OPOS] $DeviceName"
+            $OPOS_Found = $true
+        }
+    }
+}
+if (-not $OPOS_Found -and $StandardPrinters.Count -eq 0) { $HTML += "<tr><td colspan='3' style='text-align:center; color:red;'>No Printers Detected</td></tr>" }
+$HTML += "</table>"
+$FinalCloudPrinters = $CloudPrinterList -join " | "
+
+# --- Disks ---
+$CloudDiskList = @()
+$HTML += "<h2>Physical Disk Health & S.M.A.R.T. Status</h2><table><tr><th>Model</th><th>Media Type</th><th>Health Status</th><th>Capacity (GB)</th><th>Wear Indicator</th><th>R/W Errors</th><th>Power-On Hours</th></tr>"
+try {
+    $Disks = Get-PhysicalDisk -ErrorAction Stop
+    $DiskCount = 1
+    if ($Disks) {
+        foreach ($Disk in $Disks) {
+            $SizeGB = [math]::Round($Disk.Size / 1GB, 2)
+            $Rel = Get-StorageReliabilityCounter -PhysicalDisk $Disk -ErrorAction SilentlyContinue
+            $POH = if ($Rel -and $Rel.PowerOnHours) { "$($Rel.PowerOnHours) hrs" } else { "N/A" }
+            $Wear = if ($Rel -and $Rel.Wear -ne $null) { "$($Rel.Wear)%" } else { "N/A" }
+            $RErr = if ($Rel -and $Rel.ReadErrorsTotal -ne $null) { $Rel.ReadErrorsTotal } else { 0 }
+            $WErr = if ($Rel -and $Rel.WriteErrorsTotal -ne $null) { $Rel.WriteErrorsTotal } else { 0 }
+            $Errors = if ($RErr -gt 0 -or $WErr -gt 0) { "<span style='color:red; font-weight:bold;'>R: $RErr / W: $WErr</span>" } else { "<span style='color:green; font-weight:bold;'>0 / 0</span>" }
+            $HStatus = $Disk.HealthStatus
+            $HColor = if ($HStatus -eq 'Healthy') { "green" } elseif ($HStatus -eq 'Warning') { "#e68a00" } else { "red" }
+            
+            $HTML += "<tr><td>$($Disk.Model)</td><td>$($Disk.MediaType)</td><td style='color:$HColor; font-weight:bold;'>$HStatus</td><td>$SizeGB</td><td style='font-weight:bold;'>$Wear</td><td>$Errors</td><td>$POH</td></tr>"
+            $CloudDiskList += "[Disk $DiskCount] Model: $($Disk.Model) | Type: $($Disk.MediaType) | Status: $HStatus | Size: $SizeGB GB | Wear: $Wear"
+            $DiskCount++
+        }
+    } else { 
+        $HTML += "<tr><td colspan='7' style='text-align:center; color:red;'>Disk Information Unavailable</td></tr>"
+        $CloudDiskList += "Not Detected"
+    }
+} catch {
+    $WmiDisks = Get-WmiObject Win32_DiskDrive -ErrorAction SilentlyContinue
+    $DiskCount = 1
+    if ($WmiDisks) {
+        foreach ($wDisk in $WmiDisks) {
+            $SizeGB = [math]::Round($wDisk.Size / 1GB, 2)
+            $HStatus = if ($wDisk.Status -eq "OK") { "Healthy" } else { $wDisk.Status }
+            $HColor = if ($HStatus -eq 'Healthy') { "green" } else { "red" }
+            $HTML += "<tr><td>$($wDisk.Model)</td><td>N/A</td><td style='color:$HColor; font-weight:bold;'>$HStatus</td><td>$SizeGB</td><td>N/A</td><td>N/A</td><td>N/A</td></tr>"
+            $CloudDiskList += "[Disk $DiskCount] Model: $($wDisk.Model) | Status: $HStatus | Size: $SizeGB GB"
+            $DiskCount++
+        }
+    } else { 
+        $HTML += "<tr><td colspan='7' style='text-align:center; color:red;'>WMI Error / Access Denied</td></tr>"
+        $CloudDiskList += "WMI Error / Access Denied"
+    }
+}
+$HTML += "</table>"
+$CloudDiskHealth = $CloudDiskList -join "`n"
+
+# --- Volumes ---
+$HTML += "<h2>Logical Volume Usage</h2><table><tr><th>Drive Letter</th><th>Volume Label</th><th>Total Capacity (GB)</th><th>Used Space (GB)</th><th>Free Space (GB)</th><th>Free Space (%)</th></tr>"
+Get-Volume | Sort-Object DriveLetter -Descending | ForEach-Object {
+    $Letter = if ($_.DriveLetter) { $_.DriveLetter } else { "System/Hidden" }
+    $Label = if ($_.FileSystemLabel) { $_.FileSystemLabel } else { "N/A" }
+    $Total = [math]::Round($_.Size / 1GB, 2)
+    $Free = [math]::Round($_.SizeRemaining / 1GB, 2)
+    $Used = $Total - $Free
+    $PctFree = if ($Total -gt 0) { [math]::Round(($Free / $Total) * 100, 2) } else { 0 }
+    $HTML += "<tr><td>$Letter</td><td>$Label</td><td>$Total</td><td>$Used</td><td>$Free</td><td>$PctFree</td></tr>"
+}
+$HTML += "</table>"
+
+# --- Network ---
+$Net = Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPAddress -ne $null -and $_.IPAddress -notmatch ":" } | Select-Object -First 1
+$HTML += "<h2>Network Configuration</h2><table>"
+$HTML += "<tr><td>IP Address:</td><td>$($Net.IPAddress[0])</td></tr>"
+$HTML += "<tr><td style='font-weight:bold;'>MAC Address:</td><td style='font-weight:bold;'>$($Net.MACAddress)</td></tr>"
+$HTML += "<tr><td>Subnet Mask:</td><td>$($Net.IPSubnet[0])</td></tr>"
+$HTML += "<tr><td>Default Gateway:</td><td>$($Net.DefaultIPGateway[0])</td></tr>"
+$HTML += "<tr><td>DNS Servers:</td><td>$($Net.DNSServerSearchOrder -join ', ')</td></tr></table>"
+
+# --- Deep Scan ---
+if ($DeepScan) {
+    $SpeedtestDir = "$env:TEMP\speedtest_cli"
+    $ExePath = "$SpeedtestDir\speedtest.exe"
+    try {
+        if (-not (Test-Path $ExePath)) {
+            New-Item -ItemType Directory -Force -Path $SpeedtestDir | Out-Null
+            Invoke-WebRequest -Uri "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-win64.zip" -OutFile "$SpeedtestDir\speedtest.zip" -ErrorAction Stop
+            Expand-Archive -Path "$SpeedtestDir\speedtest.zip" -DestinationPath $SpeedtestDir -Force -ErrorAction Stop
+        }
+    } catch { }
+
+    $HTML += "<h2>Network Performance Analysis</h2><table><tr><th>Download Bandwidth</th><th>Upload Bandwidth</th></tr>"
+    try {
+        $SpeedJson = & $ExePath --accept-license --accept-gdpr -f json 2>$null
+        if ($SpeedJson) {
+            $SpeedResult = $SpeedJson | ConvertFrom-Json
+            $DL = "$([math]::Round($SpeedResult.download.bandwidth / 125000, 2)) Mbps"
+            $UL = "$([math]::Round($SpeedResult.upload.bandwidth / 125000, 2)) Mbps"
+            $HTML += "<tr><td style='font-weight:bold; color:green;'>$DL</td><td style='font-weight:bold; color:green;'>$UL</td></tr>"
+        } else { throw "No response" }
+    } catch {
+        $HTML += "<tr><td colspan='2' style='color:red; font-weight:bold;'>Speed test execution failed.</td></tr>"
+    }
+    $HTML += "</table>"
+    Remove-Item -Path $SpeedtestDir -Recurse -Force -ErrorAction SilentlyContinue
+    
+    $HTML += "<h2>Local Network Device Discovery</h2><table><tr><th>IP Address</th><th>Hostname</th><th>Status</th></tr>"
+    $BaseIP = $Net.IPAddress[0].Substring(0, $Net.IPAddress[0].LastIndexOf('.'))
+    $PingTasks = 1..254 | ForEach-Object {
+        $TargetIP = "$BaseIP.$_"
+        $Ping = [System.Net.NetworkInformation.Ping]::new()
+        $Ping.SendPingAsync($TargetIP, 150)
+    }
+    [Threading.Tasks.Task]::WaitAll($PingTasks)
+    foreach ($Task in $PingTasks) {
+        if ($Task.Result.Status -eq 'Success') {
+            try { $HostName = [System.Net.Dns]::GetHostEntry($Task.Result.Address).HostName } catch { $HostName = "N/A" }
+            $HTML += "<tr><td>$($Task.Result.Address)</td><td>$HostName</td><td style='color:green;'>Online</td></tr>"
+        }
+    }
+    $HTML += "</table>"
+} else {
+    $HTML += "<h2>Network Performance & Discovery</h2><p style='color:gray; padding-left:20px;'><i>Execution skipped. (Requires DeepScan).</i></p>"
+}
+
+# ==========================================
+# 3.4 DATA SYNCHRONIZATION ENGINE (DELTA UPDATE)
+# ==========================================
+$CurrentData = [ordered]@{
+    BU             = $BU
+    BranchID       = $BranchID
+    ComputerName   = $env:COMPUTERNAME
+    ComputerDesc   = $CompDesc
+    Manufacturer   = $CompSys.Manufacturer
+    Model          = $CompSys.Model
+    SerialNumber   = $BIOS.SerialNumber
+    OSVersion      = $CombinedOS
+    CPU            = $CPU.Name
+    RAM            = "$RAM_Total GB"
+    IPAddress      = $Net.IPAddress[0]
+    MACAddress     = $Net.MACAddress
+    Antivirus1     = $CloudAV1
+    Antivirus2     = $CloudAV2
+    DiskHealth     = $CloudDiskHealth
+    StabilityScore = $HealthScore
+    Uptime         = $UptimeStr
+    PendingReboot  = $NeedsReboot
+    TeamViewerID   = $TV_ID
+    AnyDeskID      = $AD_ID
+    ActiveUsers    = $FinalCloudUsers
+    AllPrinters    = $FinalCloudPrinters
+    AllSoftware    = $FinalCloudSoftware
+    AgentVersion   = $AgentVersion
+}
+
+$SyncType = "FullSync"
+$FinalPayload = @{}
+
+if (Test-Path $StateFile) {
+    try {
+        $LastState = Get-Content $StateFile -Raw | ConvertFrom-Json
+        $ChangesFound = $false
+        
+        $FinalPayload["SerialNumber"] = $CurrentData["SerialNumber"]
+        $FinalPayload["ComputerName"] = $CurrentData["ComputerName"]
+        $FinalPayload["BranchID"]     = $CurrentData["BranchID"]
+        $FinalPayload["BU"]           = $CurrentData["BU"]
+
+        foreach ($Key in $CurrentData.Keys) {
+            $CurrentVal = [string]$CurrentData[$Key]
+            $LastVal    = [string]$LastState.$Key
+            if ($CurrentVal -cne $LastVal) {
+                $FinalPayload[$Key] = $CurrentVal
+                $ChangesFound = $true
+            }
+        }
+        $SyncType = if ($ChangesFound) { "DeltaUpdate" } else { "Heartbeat" }
+        $FinalPayload["Type"] = $SyncType
+    } catch { $SyncType = "FullSync" }
+}
+
+if ($SyncType -eq "FullSync") {
+    $FinalPayload = $CurrentData
+    $FinalPayload["Type"] = "FullSync"
+}
+
+# ==========================================
+# 3.5 CLOUD DATA TRANSMISSION & C2
+# ==========================================
+$MaxRetries = 6        
+$Attempt = 0
+$IsSuccess = $false
+
+$JsonPayload = $FinalPayload | ConvertTo-Json -Depth 5
+$Utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($JsonPayload)
+
+while ($Attempt -lt $MaxRetries -and -not $IsSuccess) {
+    $Attempt++
+    try {
+        $SyncTimer = [System.Diagnostics.Stopwatch]::StartNew()
+        $Response = Invoke-RestMethod -Uri $GoogleScriptURL -Method Post -Body $Utf8Bytes -ContentType "application/json; charset=utf-8" -TimeoutSec 30
+        $SyncTimer.Stop()
+        $IsSuccess = $true
+        
+        $ElapsedSec = [math]::Round($SyncTimer.Elapsed.TotalSeconds, 2)
+        $PayloadSizeKB = [math]::Round($Utf8Bytes.Length / 1KB, 2)
+        "$(Get-Date) - [Cloud Sync] Attempt $($Attempt): Success. Size: $PayloadSizeKB KB | Time: $ElapsedSec s." | Out-File "$WorkDir\SAM_Log.txt" -Append
+
+        if ($Response -match "Success" -or $Response -match "Ack" -or $Response -match "Missing Row") {
+            $CurrentData | ConvertTo-Json -Depth 5 | Out-File $StateFile -Encoding UTF8
+            
+            # --- C2 COMMAND PROCESSING & SELF-HEALING ---
+            if ($Response -match "CMD:(.+)") {
+                $RemoteCmd = $matches[1].Trim()
+                if ($RemoteCmd -ne "NONE" -and $RemoteCmd -ne "") {
+                    "$(Get-Date) - C2 Command Received: $RemoteCmd" | Out-File "$WorkDir\SAM_Log.txt" -Append
+                    
+                    $CommandList = $RemoteCmd -split "&&"
+                    foreach ($SingleCmd in $CommandList) {
+                        $ParsedCmd = $SingleCmd.Trim()
+                        switch -Regex ($ParsedCmd) {
+                            "^SHUTDOWN$"   { Start-Process "shutdown.exe" -ArgumentList "/s /t 60 /c `"IT Support Remote Command`"" -WindowStyle Hidden }
+                            "^RESTART$"    { Start-Process "shutdown.exe" -ArgumentList "/r /t 60 /c `"IT Support Remote Command`"" -WindowStyle Hidden }
+                            "^CLEAR_TEMP$" { Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue }
+                            
+                            "^FORCE_SYNC$" { 
+                                Remove-Item -Path $StateFile -Force -ErrorAction SilentlyContinue
+                                "$(Get-Date) - [Self-Healing] State cleared. Forcing Full Sync next cycle." | Out-File "$WorkDir\SAM_Log.txt" -Append
+                            }
+                            
+                            "^RUN_TASK:(.+)$" {
+                                $TaskData = $matches[1].Trim()
+                                $TaskParts = $TaskData -split '\|'
+                                $TaskFileName = $TaskParts[0].Trim()
+                                $TaskArgs = if ($TaskParts.Count -gt 1) { $TaskParts[1..($TaskParts.Count-1)] } else { @() }
+                                
+                                $TaskUrl = "$TaskBaseUrl$TaskFileName"
+                                $LocalTaskPath = "$env:TEMP\$TaskFileName"
+                                
+                                try {
+                                    Invoke-WebRequest -Uri $TaskUrl -OutFile $LocalTaskPath -UseBasicParsing -ErrorAction Stop
+                                    if (Test-Path $LocalTaskPath) {
+                                        $ArgString = ($TaskArgs | ForEach-Object { "`"$_`"" }) -join " "
+                                        $ProcessArgs = "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"& { try { & '$LocalTaskPath' $ArgString } finally { Start-Sleep -Seconds 2; Remove-Item -Path '$LocalTaskPath' -Force -ErrorAction SilentlyContinue } }`""
+                                        Start-Process powershell.exe -ArgumentList $ProcessArgs -WindowStyle Hidden
+                                    }
+                                } catch { "$(Get-Date) - Task Failed: $TaskFileName" | Out-File "$WorkDir\SAM_Log.txt" -Append }
+                            }
+                            Default { "$(Get-Date) - Unknown Command: $ParsedCmd" | Out-File "$WorkDir\SAM_Log.txt" -Append }
+                        }
+                    }
+                }
+            }
+        }
+    } catch { 
+        if ($null -ne $SyncTimer) { $SyncTimer.Stop() }
+        $ElapsedFail = if ($null -ne $SyncTimer) { [math]::Round($SyncTimer.Elapsed.TotalSeconds, 2) } else { 0 }
+        
+        $RandomRetry = Get-Random -Minimum 300 -Maximum 900
+        "$(Get-Date) - [Sync Error] Attempt $($Attempt) Failed ($ElapsedFail s). Retrying in $RandomRetry seconds." | Out-File "$WorkDir\SAM_Log.txt" -Append
+        
+        if ($Attempt -lt $MaxRetries) { Start-Sleep -Seconds $RandomRetry } 
+        else { $HTML += "<h3 style='color:red; text-align:center;'>⚠️ CLOUD SYNC FAILED</h3>" }
+    }
+}
+
+# Write HTML Report
+$HTML += "</body></html>"
+[System.IO.File]::WriteAllText($ReportPath, $HTML, [System.Text.Encoding]::UTF8)
+if (-not $Silent) { Invoke-Item $ReportPath }
+
+"$(Get-Date) - Execution complete. Exiting process." | Out-File "$WorkDir\SAM_Log.txt" -Append
