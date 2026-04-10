@@ -1,15 +1,34 @@
-﻿param([string]$AppName)
-$LogFile = "C:\IT_Support\SAM_Log.txt"
-try {
-    $Paths = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
-    $App = Get-ItemProperty $Paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match [regex]::Escape($AppName) } | Select-Object -First 1
-    if ($App) {
-        if ($App.QuietUninstallString) { Start-Process cmd.exe -ArgumentList "/c $($App.QuietUninstallString)" -WindowStyle Hidden -Wait }
-        elseif ($App.UninstallString) {
-            $Cmd = $App.UninstallString -replace "/I", "/X" -replace "msiexec.exe", "msiexec.exe /qn /norestart"
-            if ($Cmd -notmatch "/qn" -and $Cmd -notmatch "/S" -and $Cmd -notmatch "/quiet") { $Cmd += " /S" }
-            Start-Process cmd.exe -ArgumentList "/c $Cmd" -WindowStyle Hidden -Wait
-        }
-        "$(Get-Date) - [Task_AppUninstall] Uninstalled $AppName" | Out-File $LogFile -Append
+param(
+    [string]$TargetApp
+)
+
+if (-not $TargetApp) { exit }
+
+# กวาดหาทั้ง 64-bit และ 32-bit Registry
+$RegPaths = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+
+# ค้นหาโปรแกรมจาก Keyword
+$App = Get-ItemProperty $RegPaths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match $TargetApp } | Select-Object -First 1
+
+if ($App -and $App.UninstallString) {
+    $UninstStr = $App.UninstallString -replace '"', ''
+    
+    # ดึงเฉพาะพาธไฟล์ exe ออกมา
+    $Exe = $UninstStr.Split(' ')[0]
+    
+    # วิเคราะห์และเลือก Silent Switch ให้เหมาะสม
+    if ($App.UninstallString -match "msiexec") {
+        $Args = "/x $($App.PSChildName) /qn /norestart"
+        $Exe = "msiexec.exe"
+    } elseif ($Exe -match "unins000.exe" -or $Exe -match "setup.exe") {
+        $Args = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
+    } else {
+        $Args = "/S"
     }
-} catch { "$(Get-Date) - Error: $($_.Exception.Message)" | Out-File $LogFile -Append }
+
+    # สั่งรันและรอจนกว่าจะลบเสร็จ
+    Start-Process -FilePath $Exe -ArgumentList $Args -WindowStyle Hidden -Wait
+}
