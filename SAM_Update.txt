@@ -49,7 +49,7 @@ Function Invoke-SAMSetup {
         if (-not $TaskExists) {
             $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Silent"
             $Trigger = New-ScheduledTaskTrigger -Daily -At 8:00AM
-            $Settings = New-ScheduledTaskSettingsSet -RunIfNetworkAvailable -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+            $Settings = New-ScheduledTaskSettingsSet -RunOnlyIfNetworkAvailable -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
             Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -User "NT AUTHORITY\SYSTEM" -RunLevel Highest -Force | Out-Null
             "$(Get-Date) - Task Scheduler Registered Successfully." | Out-File "$WorkDir\SAM_Log.txt" -Append
         }
