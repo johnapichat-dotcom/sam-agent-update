@@ -8,9 +8,9 @@ Function Write-SAMLog {
     param([string]$Message)
     $Timestamp = Get-Date -Format "MM/dd/yyyy HH:mm:ss"
     $LogEntry = "$Timestamp - [UninstallTask] $Message"
-    try {
-        $LogEntry | Out-File -FilePath $LogFile -Append -Encoding UTF8
-    } catch { }
+    
+    # [FIX 1] ใช้ Add-Content แก้อาการ Log เป็นภาษาต่างดาว (Encoding Mismatch)
+    Add-Content -Path $LogFile -Value $LogEntry
 }
 
 if (-not $TargetApp) { 
@@ -31,15 +31,20 @@ $App = Get-ItemProperty $RegPaths -ErrorAction SilentlyContinue | Where-Object {
 
 if ($App -and $App.UninstallString) {
     $AppName = $App.DisplayName
-    $UninstStr = $App.UninstallString -replace '"', ''
+    $UninstStr = $App.UninstallString
     
     Write-SAMLog "Match found: '$AppName'. Base String: $UninstStr"
     
-    # ดึงเฉพาะพาธไฟล์ exe ออกมา
-    $Exe = $UninstStr.Split(' ')[0]
+    # [FIX 2] ใช้ Regex ดึงพาธ .exe ออกมาให้สมบูรณ์ รองรับโฟลเดอร์เว้นวรรค
+    $Exe = ""
+    if ($UninstStr -match '(?i)(.*?\.exe)') {
+        $Exe = $matches[1] -replace '"', ''
+    } else {
+        $Exe = $UninstStr.Split(' ')[0] -replace '"', ''
+    }
     
     # วิเคราะห์และเลือก Silent Switch ให้เหมาะสม
-    if ($App.UninstallString -match "msiexec") {
+    if ($UninstStr -match "msiexec") {
         $Args = "/x $($App.PSChildName) /qn /norestart"
         $Exe = "msiexec.exe"
     } elseif ($Exe -match "unins000.exe" -or $Exe -match "setup.exe") {
@@ -48,7 +53,7 @@ if ($App -and $App.UninstallString) {
         $Args = "/S"
     }
 
-    Write-SAMLog "Executing removal: $Exe $Args"
+    Write-SAMLog "Executing removal: `"$Exe`" $Args"
 
     # สั่งรันและรอจนกว่าจะลบเสร็จ พร้อมจับ Exit Code
     try {
