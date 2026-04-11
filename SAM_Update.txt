@@ -8,11 +8,11 @@ param(
 
 # ==============================================================================
 # SYSTEM NAME : S.A.M. (Smart Agent Management)
-# VERSION     : 2.1.3 (Task Scheduler Driven, Adaptive Jitter)
+# VERSION     : 2.1.4 (Advanced Inventory & Smart Regex Filter)
 # DEVELOPER   : Aphichat IT Support
 # ==============================================================================
 
-$CurrentVersion  = "2.1.3"
+$CurrentVersion  = "2.1.4"
 $SystemName      = "SAM_Agent"
 $AgentVersion    = "v$CurrentVersion"
 $WorkDir         = "C:\IT_Support"
@@ -212,7 +212,7 @@ if (Test-Path $ConfigFile) {
 # ==============================================================================
 $CurrentTime = Get-Date
 
-# --- Catch-Up & State Awareness (Abort if already synced today) ---
+# --- Catch-Up & State Awareness ---
 if (Test-Path $StateFile) {
     $LastSyncTime = (Get-Item $StateFile).LastWriteTime
     if ($LastSyncTime.Date -eq $CurrentTime.Date) {
@@ -334,11 +334,51 @@ $HTML += "<tr><td>TeamViewer ID:</td><td>$TV_Combined</td></tr>"
 $HTML += "<tr><td>AnyDesk ID:</td><td>$AD_ID</td></tr>"
 $HTML += "</table>"
 
+# --- Software & Inventory Module (v2.1.4 Patch) ---
+$CloudSoftwareList = @()
+$HTML += "<h2>Installed Applications Inventory</h2><table><tr><th>Application Name</th><th>Version</th><th>Install Date</th></tr>"
+
+# 1. กวาด Registry แบบเจาะลึก (รวม User Profile)
+$SoftwarePaths = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+
+# Regex กำจัด Noise (Runtimes, Libraries, Updates)
+$NoiseRegex = "(?i)(Redistributable|Additional Runtime|Minimum Runtime|Core Interpreter|pip Bootstrap|Standard Library|Tcl/Tk Support|Test Suite|Development Libraries|Documentation|Executables|Add to Path|Launcher|Update Helper|Prerequisites)"
+
+$RegApps = Get-ItemProperty $SoftwarePaths -ErrorAction SilentlyContinue | Where-Object { 
+    $_.DisplayName -ne $null -and 
+    $_.SystemComponent -ne 1 -and 
+    $_.ParentKeyName -eq $null -and
+    $_.DisplayName -notmatch "KB\d{6,}" -and
+    $_.DisplayName -notmatch $NoiseRegex
+}
+
+# 2. กวาด Microsoft Store UWP Apps (ลบ Bloatware ทิ้ง)
+$UwpApps = @()
+try {
+    $UwpApps = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue | Where-Object { 
+        $_.IsFramework -eq $false -and 
+        $_.NonRemovable -eq $false -and 
+        $_.Name -notmatch "(?i)(Microsoft\.|Windows\.|System\.|Xbox|Zune)"
+    } | Select-Object @{Name="DisplayName";Expression={$_.Name}}, @{Name="DisplayVersion";Expression={$_.Version}}, @{Name="InstallDate";Expression={""}}
+} catch {}
+
+# รวมร่างข้อมูลและลบตัวซ้ำ
+$AllSoftware = @($RegApps) + @($UwpApps) | Sort-Object DisplayName -Unique
+
+foreach ($app in $AllSoftware) {
+    $HTML += "<tr><td>$($app.DisplayName)</td><td>$($app.DisplayVersion)</td><td>$($app.InstallDate)</td></tr>"
+    $CloudSoftwareList += "$($app.DisplayName)"
+}
+$FinalCloudSoftware = $CloudSoftwareList -join " | "
+$HTML += "</table>"
+
 # --- Security & Antivirus Status ---
 $CloudAV = @()
 $HTML += "<h2>Security & Antivirus Status</h2><table><tr><th>Installed Antivirus</th><th>Version</th></tr>"
-$SoftwarePaths = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
-$AllSoftware = Get-ItemProperty $SoftwarePaths -ErrorAction SilentlyContinue | Where-Object DisplayName -ne $null
 try {
     $AVs = Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName AntivirusProduct -ErrorAction Stop
     if ($AVs) {
@@ -417,16 +457,6 @@ Get-LocalUser | ForEach-Object {
     if ($_.Enabled -eq $true) { $CloudActiveUsers += "$($_.Name) ($Role)" }
 }
 $FinalCloudUsers = $CloudActiveUsers -join " | "
-$HTML += "</table>"
-
-# --- Software ---
-$HTML += "<h2>Installed Applications Inventory</h2><table><tr><th>Application Name</th><th>Version</th><th>Install Date</th></tr>"
-$CloudSoftwareList = @()
-Get-ItemProperty $SoftwarePaths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null } | Sort-Object DisplayName -Unique | ForEach-Object {
-    $HTML += "<tr><td>$($_.DisplayName)</td><td>$($_.DisplayVersion)</td><td>$($_.InstallDate)</td></tr>"
-    $CloudSoftwareList += "$($_.DisplayName)"
-}
-$FinalCloudSoftware = $CloudSoftwareList -join " | "
 $HTML += "</table>"
 
 # --- Printers & OPOS ---
