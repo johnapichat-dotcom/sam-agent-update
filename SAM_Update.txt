@@ -8,7 +8,7 @@ param(
 
 # ==============================================================================
 # SYSTEM NAME : S.A.M. (Smart Agent Management)
-# VERSION     : 2.1.4 (Advanced Inventory & Smart Regex Filter)
+# VERSION     : 2.1.4 (Inventory Hotfix & Smart Regex Filter)
 # DEVELOPER   : Aphichat IT Support
 # ==============================================================================
 
@@ -334,40 +334,28 @@ $HTML += "<tr><td>TeamViewer ID:</td><td>$TV_Combined</td></tr>"
 $HTML += "<tr><td>AnyDesk ID:</td><td>$AD_ID</td></tr>"
 $HTML += "</table>"
 
-# --- Software & Inventory Module (v2.1.4 Patch) ---
+# --- Software & Inventory Module ---
 $CloudSoftwareList = @()
 $HTML += "<h2>Installed Applications Inventory</h2><table><tr><th>Application Name</th><th>Version</th><th>Install Date</th></tr>"
 
-# 1. กวาด Registry แบบเจาะลึก (รวม User Profile)
+# 1. กวาด Registry ระดับ System (HKLM) และ User Profile (HKCU - เพื่อหา LINE, TikTok ที่ลงใน Profile ส่วนตัว)
 $SoftwarePaths = @(
     "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
     "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
     "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
 )
 
-# Regex กำจัด Noise (Runtimes, Libraries, Updates)
-$NoiseRegex = "(?i)(Redistributable|Additional Runtime|Minimum Runtime|Core Interpreter|pip Bootstrap|Standard Library|Tcl/Tk Support|Test Suite|Development Libraries|Documentation|Executables|Add to Path|Launcher|Update Helper|Prerequisites)"
+# 2. ปรับ Regex ให้ถูกต้อง: ซ่อนเฉพาะไส้ในของ Python/C++ แต่ปล่อย Redistributable และ Launcher ให้แสดงผล
+$NoiseRegex = "(?i)(Additional Runtime|Minimum Runtime|Core Interpreter|pip Bootstrap|Standard Library|Tcl/Tk Support|Test Suite|Development Libraries|Documentation|Executables|Add to Path|Update Helper|Prerequisites|Android Auto|Android Switch|Google Partner Setup|Google Play services|Play Store|^Google$)"
 
-$RegApps = Get-ItemProperty $SoftwarePaths -ErrorAction SilentlyContinue | Where-Object { 
+# รวมข้อมูล คัดกรอง และตัดตัวซ้ำ (เอา Get-AppxPackage ออกเพื่อกำจัด Bloatware)
+$AllSoftware = Get-ItemProperty $SoftwarePaths -ErrorAction SilentlyContinue | Where-Object { 
     $_.DisplayName -ne $null -and 
     $_.SystemComponent -ne 1 -and 
     $_.ParentKeyName -eq $null -and
     $_.DisplayName -notmatch "KB\d{6,}" -and
     $_.DisplayName -notmatch $NoiseRegex
-}
-
-# 2. กวาด Microsoft Store UWP Apps (ลบ Bloatware ทิ้ง)
-$UwpApps = @()
-try {
-    $UwpApps = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue | Where-Object { 
-        $_.IsFramework -eq $false -and 
-        $_.NonRemovable -eq $false -and 
-        $_.Name -notmatch "(?i)(Microsoft\.|Windows\.|System\.|Xbox|Zune)"
-    } | Select-Object @{Name="DisplayName";Expression={$_.Name}}, @{Name="DisplayVersion";Expression={$_.Version}}, @{Name="InstallDate";Expression={""}}
-} catch {}
-
-# รวมร่างข้อมูลและลบตัวซ้ำ
-$AllSoftware = @($RegApps) + @($UwpApps) | Sort-Object DisplayName -Unique
+} | Sort-Object DisplayName -Unique
 
 foreach ($app in $AllSoftware) {
     $HTML += "<tr><td>$($app.DisplayName)</td><td>$($app.DisplayVersion)</td><td>$($app.InstallDate)</td></tr>"
