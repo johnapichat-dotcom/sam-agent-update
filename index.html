@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S.A.M. Web Provisioning Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .jarvis-border {
+            border: 1px solid #00e5ff;
+            box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
+        }
+        .jarvis-text {
+            color: #00e5ff;
+        }
+        .jarvis-bg {
+            background-color: rgba(0, 229, 255, 0.1);
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1e1e1e; }
+        ::-webkit-scrollbar-thumb { background: #00e5ff; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00b3cc; }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-lg bg-[#1e1e1e] rounded-xl p-8 jarvis-border transition-all duration-300">
+        <div class="text-center mb-8">
+            <h1 class="text-2xl font-bold tracking-wider jarvis-text uppercase flex justify-center items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
+                S.A.M. Provisioning
+            </h1>
+            <p class="text-sm text-gray-400 mt-2">Zero-Touch Deployment Center</p>
+        </div>
+
+        <form id="provisionForm" class="space-y-5">
+            <!-- 1. BU -->
+            <div>
+                <label class="block text-sm font-medium mb-1 text-gray-300" for="bu">1. Select Business Unit (BU)</label>
+                <select id="bu" class="w-full bg-[#2a2a2a] border border-gray-600 rounded p-2.5 text-white focus:outline-none focus:border-[#00e5ff] transition-colors appearance-none">
+                    <option value="" disabled selected>-- Choose BU --</option>
+                    <option value="Station">Station</option>
+                    <option value="OLP">OLP</option>
+                    <option value="Punthai">Punthai</option>
+                    <option value="PunthaiFC">PunthaiFC</option>
+                    <option value="MaxMart">MaxMart</option>
+                    <option value="ATL">ATL</option>
+                    <option value="Oil depot">Oil depot</option>
+                    <option value="AutoBacs">AutoBacs</option>
+                    <option value="Subway">Subway</option>
+                    <option value="CoffeeWorld">CoffeeWorld</option>
+                    <option value="Office">Office</option>
+                    <option value="LPG plant">LPG plant</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+
+            <!-- 2. Branch ID -->
+            <div>
+                <label class="block text-sm font-medium mb-1 text-gray-300" for="branch">2. Branch Name / ID</label>
+                <div class="flex space-x-2">
+                    <input type="text" id="branch" placeholder="e.g. 1234 or แกลง11" class="w-2/3 bg-[#2a2a2a] border border-gray-600 rounded p-2.5 text-white focus:outline-none focus:border-[#00e5ff] transition-colors">
+                    <select id="deviceType" class="w-1/3 bg-[#2a2a2a] border border-gray-600 rounded p-2.5 text-white focus:outline-none focus:border-[#00e5ff] transition-colors appearance-none">
+                        <option value="Pos">Pos</option>
+                        <option value="Pos2">Pos2</option>
+                        <option value="Pos3">Pos3</option>
+                        <option value="Office">Office</option>
+                        <option value="Office2">Office2</option>
+                        <option value="NB">NB</option>
+                        <option value="AIO">AIO</option>
+                        <option value="PC">PC</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- 3. Province -->
+            <div>
+                <label class="block text-sm font-medium mb-1 text-gray-300" for="province">3. Province (จังหวัด)</label>
+                <select id="province" class="w-full bg-[#2a2a2a] border border-gray-600 rounded p-2.5 text-white focus:outline-none focus:border-[#00e5ff] transition-colors appearance-none">
+                    <option value="" disabled selected>-- Choose Province --</option>
+                    <option value="กรุงเทพมหานคร">กรุงเทพมหานคร</option>
+                    <option value="กระบี่">กระบี่</option>
+                    <option value="กาญจนบุรี">กาญจนบุรี</option>
+                    <option value="ขอนแก่น">ขอนแก่น</option>
+                    <option value="ชลบุรี">ชลบุรี</option>
+                    <option value="เชียงใหม่">เชียงใหม่</option>
+                    <option value="นครราชสีมา">นครราชสีมา</option>
+                    <option value="ปทุมธานี">ปทุมธานี</option>
+                    <option value="ระยอง">ระยอง</option>
+                    <option value="สมุทรปราการ">สมุทรปราการ</option>
+                    <option value="อื่นๆ (ระบุใน JSON ทีหลัง)">-- อื่นๆ (เพิ่มเติม) --</option>
+                </select>
+            </div>
+
+            <!-- Generate Button -->
+            <button type="button" onclick="generatePayload()" class="w-full bg-[#00e5ff] hover:bg-[#00b3cc] text-black font-bold py-3 px-4 rounded shadow-[0_0_15px_rgba(0,229,255,0.4)] transition-all duration-300 mt-6 uppercase tracking-widest flex justify-center items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-9 5 18 3-9h5"/></svg>
+                Generate One-Liner Command
+            </button>
+        </form>
+
+        <!-- Result Box -->
+        <div id="resultBox" class="hidden mt-8 bg-[#151515] p-4 rounded-lg border border-gray-700">
+            <h2 class="text-sm font-bold text-[#00e5ff] mb-2 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>
+                Deployment Command:
+            </h2>
+            <p class="text-xs text-gray-400 mb-3">Copy this command and run it in <b>PowerShell (Run as Administrator)</b> on the target machine.</p>
+            
+            <div class="relative bg-black rounded p-4 font-mono text-xs sm:text-sm text-green-400 overflow-x-auto border border-gray-800 break-all">
+                <code id="cmdOutput"></code>
+            </div>
+            
+            <button onclick="copyToClipboard()" id="copyBtn" class="mt-4 w-full bg-gray-800 hover:bg-gray-700 text-white font-medium py-2.5 px-4 rounded transition-colors text-sm flex justify-center items-center gap-2 border border-gray-600">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                Copy to Clipboard
+            </button>
+        </div>
+
+        <div class="mt-8 text-center text-xs text-gray-600 font-mono">
+            <p>S.A.M. Web Dashboard v2.1.5</p>
+            <p>DEVELOPER: Aphichat IT Support</p>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-green-500 text-white px-6 py-3 rounded shadow-lg transform transition-all duration-300 translate-y-20 opacity-0 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        Command Copied to Clipboard!
+    </div>
+
+    <script>
+        // กำหนด URL ของ SAM_Dropper.ps1 ที่อยู่บน GitHub Release ของบอส
+        const DROPPER_URL = "https://github.com/johnapichat-dotcom/sam-agent-update/releases/download/v2.1.5/SAM_Dropper.ps1";
+
+        function generatePayload() {
+            const bu = document.getElementById('bu').value;
+            const branch = document.getElementById('branch').value;
+            const deviceType = document.getElementById('deviceType').value;
+            const province = document.getElementById('province').value;
+
+            if (!bu || !branch || !province) {
+                // Shake animation for error
+                const form = document.querySelector('.jarvis-border');
+                form.classList.add('animate-pulse', 'border-red-500');
+                setTimeout(() => form.classList.remove('animate-pulse', 'border-red-500'), 1000);
+                return;
+            }
+
+            const fullBranch = `${branch.trim()}-${deviceType}`;
+            
+            // สร้าง One-Liner PowerShell Command (Secure & Bypass Execution Policy)
+            const psCommand = `powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "iex (iwr '${DROPPER_URL}' -UseBasicParsing); Install-SAM -BU '${bu}' -BranchID '${fullBranch}' -Province '${province}'"`;
+
+            document.getElementById('cmdOutput').innerText = psCommand;
+            
+            // แสดงกล่อง Result
+            const resultBox = document.getElementById('resultBox');
+            resultBox.classList.remove('hidden');
+            resultBox.classList.add('animate-[fadeIn_0.5s_ease-in-out]');
+            
+            // เลื่อนหน้าจอลงมาให้เห็นปุ่ม Copy ชัดเจน
+            setTimeout(() => {
+                resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 100);
+        }
+
+        function copyToClipboard() {
+            const cmd = document.getElementById('cmdOutput').innerText;
+            
+            // ใช้ API ใหม่สำหรับ Copy
+            navigator.clipboard.writeText(cmd).then(() => {
+                showToast();
+                
+                // เปลี่ยนสถานะปุ่มชั่วคราว
+                const copyBtn = document.getElementById('copyBtn');
+                const originalHTML = copyBtn.innerHTML;
+                copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Copied!';
+                copyBtn.classList.replace('bg-gray-800', 'bg-green-600');
+                copyBtn.classList.replace('border-gray-600', 'border-green-500');
+                
+                setTimeout(() => {
+                    copyBtn.innerHTML = originalHTML;
+                    copyBtn.classList.replace('bg-green-600', 'bg-gray-800');
+                    copyBtn.classList.replace('border-green-500', 'border-gray-600');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+                // Fallback แบบเก่า
+                const textarea = document.createElement('textarea');
+                textarea.value = cmd;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showToast();
+            });
+        }
+
+        function showToast() {
+            const toast = document.getElementById('toast');
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
