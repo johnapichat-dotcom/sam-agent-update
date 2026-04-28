@@ -23,9 +23,9 @@ $StateFile       = "$WorkDir\LastState.json"
 $GoogleScriptURL = "https://script.google.com/macros/s/AKfycbz9QHQy8FxBUMjZFQHOGEfUjcZGhBxB2I2dRiXjf_my4oTfq9yCFe1XH_e20vw-4S-RZg/exec"
 
 # --- Cloud Repository URLs ---
-$VersionUrl  = "https://johnapichat-dotcom.github.io/Sam-Agent/version.txt"
-$AgentUrl    = "https://johnapichat-dotcom.github.io/Sam-Agent/SAM_Update.txt"
-$TaskBaseUrl = "https://johnapichat-dotcom.github.io/Sam-Agent/task/"
+$VersionUrl  = "https://johnapichat-dotcom.github.io/sam-agent-update/version.txt"
+$AgentUrl    = "https://johnapichat-dotcom.github.io/sam-agent-update/SAM_Update.txt"
+$TaskBaseUrl = "https://johnapichat-dotcom.github.io/sam-agent-update/task/"
 
 # [BUG FIX] อ่านตำแหน่งที่รันสคริปต์แบบ Absolute Path ป้องกันปัญหา DriveNotFound
 $Global:ExecDir = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } elseif ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
