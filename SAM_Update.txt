@@ -355,7 +355,12 @@ if (-not $env:SAM_JUST_UPDATED) {
         $RawVersion = (Invoke-RestMethod -Uri $VersionUrl -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop)
         $LatestVersion = [regex]::Match($RawVersion, '(\d+\.\d+\.\d+)').Value
         if ([version]$LatestVersion -gt [version]$CurrentVersion) {
-            Invoke-WebRequest -Uri $AgentUrl -OutFile $TempPath -TimeoutSec 30 -ErrorAction Stop
+            # [JARVIS FIX]: บังคับดาวน์โหลดและเข้ารหัสเป็น UTF-8 with BOM ป้องกันภาษาไทยแตก
+            $WebClient = New-Object System.Net.WebClient
+            $WebClient.Encoding = [System.Text.Encoding]::UTF8
+            $NewScript = $WebClient.DownloadString($AgentUrl)
+            $NewScript | Out-File -FilePath $TempPath -Encoding UTF8 -Force
+
             if ((Get-Item $TempPath).Length -gt 1000) { 
                 $RunMode = if ($Silent) { "-Silent" } else { "" }
                 $SwapCmd = "cmd /c timeout /t 2 > nul && del `"$ScriptPath`" && move `"$TempPath`" `"$ScriptPath`" && set SAM_JUST_UPDATED=1 && powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" $RunMode"
