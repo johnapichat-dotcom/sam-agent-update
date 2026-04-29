@@ -9,11 +9,11 @@ param(
 
 # ==============================================================================
 # SYSTEM NAME : S.A.M. (Smart Agent Management)
-# VERSION     : 2.1.6 (Enterprise Final Build - Multi-Trigger)
+# VERSION     : 2.1.7 (Enterprise Final Build - Multi-Trigger)
 # DEVELOPER   : Aphichat IT Support
 # ==============================================================================
 
-$CurrentVersion  = "2.1.6"
+$CurrentVersion  = "2.1.7"
 $SystemName      = "SAM_Agent"
 $AgentVersion    = "v$CurrentVersion"
 $WorkDir         = "C:\IT_Support"
@@ -23,9 +23,9 @@ $StateFile       = "$WorkDir\LastState.json"
 $GoogleScriptURL = "https://script.google.com/macros/s/AKfycbz9QHQy8FxBUMjZFQHOGEfUjcZGhBxB2I2dRiXjf_my4oTfq9yCFe1XH_e20vw-4S-RZg/exec"
 
 # --- Cloud Repository URLs ---
-$VersionUrl  = "https://johnapichat-dotcom.github.io/sam-agent-update/version.txt"
-$AgentUrl    = "https://johnapichat-dotcom.github.io/sam-agent-update/SAM_Update.txt"
-$TaskBaseUrl = "https://johnapichat-dotcom.github.io/sam-agent-update/task/"
+$VersionUrl  = "https://raw.githubusercontent.com/johnapichat-dotcom/sam-agent-update/main/version.txt"
+$AgentUrl    = "https://raw.githubusercontent.com/johnapichat-dotcom/sam-agent-update/main/SAM_Agent.ps1"
+$TaskBaseUrl = "https://raw.githubusercontent.com/johnapichat-dotcom/sam-agent-update/main/task/"
 
 # [BUG FIX] อ่านตำแหน่งที่รันสคริปต์แบบ Absolute Path ป้องกันปัญหา DriveNotFound
 $Global:ExecDir = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } elseif ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
@@ -71,7 +71,7 @@ Function Invoke-SAMSetup {
         $UninstallContent = "Unregister-ScheduledTask -TaskName 'SAM_Agent_DailySync' -Confirm:`$false -ErrorAction SilentlyContinue`nRemove-Item -Path '$WorkDir' -Recurse -Force`nWrite-Host 'Removed.'`nStart-Sleep -Seconds 2"
         $UninstallContent | Out-File "$WorkDir\Uninstall.ps1" -Encoding UTF8
 
-        # --- 1.4 Task Scheduler (อัปเกรด v2.1.6: Multi-Trigger) ---
+        # --- 1.4 Task Scheduler (Multi-Trigger) ---
         $TaskName = "SAM_Agent_DailySync"
         $TaskExists = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         
@@ -91,6 +91,27 @@ Function Invoke-SAMSetup {
 }
 
 Invoke-SAMSetup
+
+# ==============================================================================
+# [JARVIS PROTOCOL] PREREQUISITE CHECK & SELF-HEALING
+# ==============================================================================
+$SmartCtlUrl = "https://github.com/johnapichat-dotcom/sam-agent-update/releases/download/UpdateSAM/smartctl.exe"
+$SmartCtlPath = "$WorkDir\smartctl.exe"
+
+if (-not (Test-Path $SmartCtlPath)) {
+    if (-not $Silent) { Write-Host "[Jarvis] smartctl.exe not found. Downloading..." -ForegroundColor Yellow }
+    "$(Get-Date) - [System] smartctl.exe is missing. Initiating download..." | Out-File "$WorkDir\SAM_Log.txt" -Append
+    
+    try {
+        Invoke-WebRequest -Uri $SmartCtlUrl -OutFile $SmartCtlPath -UseBasicParsing
+        "$(Get-Date) - [System] smartctl.exe downloaded successfully." | Out-File "$WorkDir\SAM_Log.txt" -Append
+    } catch {
+        "$(Get-Date) - [Error] Failed to download smartctl.exe. HHD/SSD Deep Scan will be skipped." | Out-File "$WorkDir\SAM_Log.txt" -Append
+    }
+} else {
+    if (-not $Silent) { Write-Host "[Jarvis] smartctl.exe is ready." -ForegroundColor Green }
+}
+# ==============================================================================
 
 # --- Console Window Concealment (Stealth Mode) ---
 if (-not $Silent) {
@@ -290,9 +311,8 @@ if ($InitialDeploy) {
 }
 elseif ($Silent) {
     if ($CurrentTime.Hour -ge 8 -and $CurrentTime.Hour -lt 14) {
-        $EndTime = Get-Date -Hour 14 -Minute 0 -Second 0
-        $RemainingSeconds = ($EndTime - $CurrentTime).TotalSeconds
-        $RandomWait = Get-Random -Minimum 10 -Maximum [int]$RemainingSeconds
+        # สุ่มตายตัว 1 นาที - 2 ชม. ชัวร์ 100% ทุก Windows
+        $RandomWait = Get-Random -Minimum 60 -Maximum 7200
         "$(Get-Date) - [Queue] Prime Window. Delaying $RandomWait seconds." | Out-File "$WorkDir\SAM_Log.txt" -Append
         Start-Sleep -Seconds $RandomWait
     }
@@ -332,7 +352,6 @@ if (-not $InternetReady) {
 # --- 3.2 AUTOMATED AGENT UPDATE MODULE (OTA) ---
 if (-not $env:SAM_JUST_UPDATED) { 
     Try {
-        # เพิ่ม Timeout ป้องกันค้าง
         $RawVersion = (Invoke-RestMethod -Uri $VersionUrl -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop)
         $LatestVersion = [regex]::Match($RawVersion, '(\d+\.\d+\.\d+)').Value
         if ([version]$LatestVersion -gt [version]$CurrentVersion) {
@@ -371,7 +390,7 @@ $BIOS = Get-CimInstance Win32_BIOS
 $CPU = Get-CimInstance Win32_Processor
 $CompDesc = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\lanmanserver\parameters" -Name "srvcomment" -ErrorAction SilentlyContinue).srvcomment
 
-# --- RAM Analyzer (อัปเกรด v2.1.6: บอร์ดเก่า Fallback) ---
+# --- RAM Analyzer ---
 $MemArray = Get-CimInstance Win32_PhysicalMemoryArray -ErrorAction SilentlyContinue
 $TotalSlots = if ($MemArray -and $MemArray.MemoryDevices) { $MemArray.MemoryDevices } else { 0 }
 $PhysicalRAM = Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue
@@ -702,7 +721,7 @@ $HTML += "<tr><td>Subnet Mask:</td><td>$($Net.IPSubnet[0])</td></tr>"
 $HTML += "<tr><td>Default Gateway:</td><td>$($Net.DefaultIPGateway[0])</td></tr>"
 $HTML += "<tr><td>DNS Servers:</td><td>$($Net.DNSServerSearchOrder -join ', ')</td></tr></table>"
 
-# --- Deep Scan (Speedtest ป้องกันค้างด้วย Timeout) ---
+# --- Deep Scan (Speedtest) ---
 if ($DeepScan) {
     $SpeedtestDir = "$env:TEMP\speedtest_cli"
     $ExePath = "$SpeedtestDir\speedtest.exe"
