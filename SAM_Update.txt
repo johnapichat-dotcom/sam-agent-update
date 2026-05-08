@@ -23,7 +23,7 @@ $StateFile       = "$WorkDir\LastState.json"
 
 # --- Cloud Repository URLs (RAW Protocol) ---
 $VersionUrl  = "https://raw.githubusercontent.com/johnapichat-dotcom/sam-agent-update/main/version.txt"
-$AgentUrl    = "https://raw.githubusercontent.com/johnapichat-dotcom/sam-agent-update/main/SAM_Agent.ps1"
+$AgentUrl    = "https://raw.githubusercontent.com/johnapichat-dotcom/sam-agent-update/main/SAM_Update.txt"
 $TaskBaseUrl = "https://raw.githubusercontent.com/johnapichat-dotcom/sam-agent-update/main/task/"
 
 $Global:ExecDir = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } elseif ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
