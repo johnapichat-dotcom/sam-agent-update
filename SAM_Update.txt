@@ -966,6 +966,8 @@ if ($PayloadType -eq "FullSync") {
 }
 
 $JsonPayload = $PayloadData | ConvertTo-Json -Depth 5 -Compress
+# [JARVIS PATCH] กำจัดอักขระขยะ Null Bytes (\u0000) ที่ทำให้ PostgreSQL แครช
+$JsonPayload = $JsonPayload -replace '\\u0000', ''
 $Utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($JsonPayload)
 
 # 3. 🛡️ ตั้งค่า Headers
