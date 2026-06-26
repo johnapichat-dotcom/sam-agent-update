@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # S.A.M. MIGRATION SCRIPT
 # FROM    : v2.2.4 (Single-file SAM_Agent.ps1 / JARVIS legacy)
 # TO      : v3.0.0 (SAM_Scheduler + SAM_Agent + SAM_Update)
@@ -242,7 +242,9 @@ if (-not $NetOK) {
     if (Test-Path $OldAgent) {
         try {
             $Action   = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$OldAgent`" -Silent"
-            $Trigger  = @(New-ScheduledTaskTrigger -AtStartup, (New-ScheduledTaskTrigger -Once -At "8:00AM" -RepetitionInterval (New-TimeSpan -Hours 2)))
+            $TriggerA = New-ScheduledTaskTrigger -AtStartup
+            $TriggerB = New-ScheduledTaskTrigger -Once -At "8:00AM" -RepetitionInterval (New-TimeSpan -Hours 2)
+            $Trigger  = @($TriggerA, $TriggerB)
             $Settings = New-ScheduledTaskSettingsSet -RunOnlyIfNetworkAvailable -StartWhenAvailable -AllowStartIfOnBatteries
             Register-ScheduledTask -TaskName "SAM_Agent_DailySync" -Action $Action -Trigger $Trigger -Settings $Settings -User "NT AUTHORITY\SYSTEM" -RunLevel Highest -Force | Out-Null
             Write-MigLog "Rollback: Legacy task restored." -Level "WARN"
